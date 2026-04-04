@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { createClient } from "@/lib/supabase/client";
 
 interface InviteInfo {
   senderName: string;
@@ -17,14 +18,19 @@ export default function ConvitePage({ params }: { params: Promise<{ token: strin
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [accepting, setAccepting] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
     params.then(({ token }) => {
-      fetch(`/api/invite?token=${token}`)
-        .then((r) => r.json())
-        .then((data) => {
+      const supabase = createClient();
+      Promise.all([
+        fetch(`/api/invite?token=${token}`).then((r) => r.json()),
+        supabase.auth.getUser(),
+      ])
+        .then(([data, { data: { user } }]) => {
           if (data.error) setError(data.error);
           else setInvite(data);
+          setIsAuthenticated(!!user);
         })
         .catch(() => setError("Erro ao carregar convite"))
         .finally(() => setLoading(false));
@@ -77,12 +83,25 @@ export default function ConvitePage({ params }: { params: Promise<{ token: strin
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Button className="w-full" onClick={handleAccept} disabled={accepting}>
-          {accepting ? "Aceitando..." : "Aceitar convite"}
-        </Button>
-        <Button variant="outline" className="w-full" onClick={() => router.push("/login")}>
-          Cancelar
-        </Button>
+        {isAuthenticated ? (
+          <>
+            <Button className="w-full" onClick={handleAccept} disabled={accepting}>
+              {accepting ? "Aceitando..." : "Aceitar convite"}
+            </Button>
+            <Button variant="outline" className="w-full" onClick={() => router.push("/dashboard")}>
+              Cancelar
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button className="w-full" onClick={() => router.push(`/cadastro?invite=${invite?.token}`)}>
+              Criar conta e aceitar
+            </Button>
+            <Button variant="outline" className="w-full" onClick={() => router.push(`/login?invite=${invite?.token}`)}>
+              Já tenho conta — Entrar
+            </Button>
+          </>
+        )}
       </CardContent>
     </Card>
   );
