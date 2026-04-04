@@ -33,11 +33,20 @@ export function InviteButton() {
   }
 
   return (
-    <div className="flex gap-2 w-full max-w-sm mx-auto">
-      <Input value={inviteUrl} readOnly className="text-xs" />
-      <Button size="icon" variant="outline" onClick={copy}>
-        {copied ? <Check className="size-4 text-green-600" /> : <Copy className="size-4" />}
-      </Button>
+    <div className="space-y-2 w-full max-w-sm mx-auto">
+      <div className="flex gap-2">
+        <Input value={inviteUrl} readOnly className="text-xs" />
+        <Button size="icon" variant="outline" onClick={copy}>
+          {copied ? <Check className="size-4 text-green-600" /> : <Copy className="size-4" />}
+        </Button>
+      </div>
+      <button
+        onClick={generate}
+        disabled={loading}
+        className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+      >
+        {loading ? "Gerando..." : "Gerar novo link"}
+      </button>
     </div>
   );
 }
