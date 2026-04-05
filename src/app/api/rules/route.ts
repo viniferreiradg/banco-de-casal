@@ -3,13 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 
 async function getOwnerAndUser1(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { couple: { select: { id: true, user1Id: true } } },
-  });
-  const coupleId = user?.couple?.id ?? null;
-  const user1Id = user?.couple?.user1Id ?? null;
-  const isUser1 = user1Id ? userId === user1Id : true;
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const coupleId = user?.coupleId ?? null;
+  let isUser1 = true;
+  if (coupleId) {
+    const couple = await prisma.couple.findUnique({ where: { id: coupleId } });
+    if (couple?.user1Id) isUser1 = userId === couple.user1Id;
+  }
   return { coupleId, userId, isUser1 };
 }
 
