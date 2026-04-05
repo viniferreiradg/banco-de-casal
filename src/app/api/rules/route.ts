@@ -3,22 +3,25 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 
 async function getOwnerAndUser1(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { couple: { include: { members: { select: { id: true, name: true } } } } },
+  });
   const coupleId = user?.coupleId ?? null;
   let isUser1 = true;
-  let user1Name: string | null = null;
-  let user2Name: string | null = null;
-  if (coupleId) {
-    const couple = await prisma.couple.findUnique({
-      where: { id: coupleId },
-      include: { members: { select: { id: true, name: true } } },
-    });
-    if (couple?.user1Id) isUser1 = userId === couple.user1Id;
-    const u1 = couple?.members.find((m) => m.id === couple.user1Id);
-    const u2 = couple?.members.find((m) => m.id !== couple.user1Id);
-    user1Name = u1?.name ?? null;
-    user2Name = u2?.name ?? null;
+  const myName = user?.name ?? null;
+  let partnerName: string | null = null;
+
+  if (user?.couple) {
+    const couple = user.couple;
+    if (couple.user1Id) isUser1 = userId === couple.user1Id;
+    partnerName = couple.members.find((m) => m.id !== userId)?.name ?? null;
   }
+
+  // user1Name = nome de quem é user1; user2Name = nome de quem é user2
+  const user1Name = isUser1 ? myName : partnerName;
+  const user2Name = isUser1 ? partnerName : myName;
+
   return { coupleId, userId, isUser1, user1Name, user2Name };
 }
 
