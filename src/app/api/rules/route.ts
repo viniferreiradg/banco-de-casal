@@ -33,10 +33,25 @@ export async function GET() {
 
   const { coupleId, userId, isUser1, user1Name, user2Name } = await getOwnerAndUser1(user.id);
 
-  const rules = await prisma.splitRule.findMany({
+  const rawRules = await prisma.splitRule.findMany({
     where: coupleId ? { coupleId } : { userId },
     orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+    include: { user: { select: { id: true } } },
   });
+
+  // Descobrir user1Id do casal para saber se o criador é user1 ou user2
+  let coupleUser1Id: string | null = null;
+  if (coupleId) {
+    const couple = await prisma.couple.findUnique({ where: { id: coupleId } });
+    coupleUser1Id = couple?.user1Id ?? null;
+  }
+
+  const rules = rawRules.map((rule) => ({
+    ...rule,
+    creatorIsUser1: coupleUser1Id
+      ? rule.userId === coupleUser1Id
+      : rule.userId === userId,
+  }));
 
   return NextResponse.json({ rules, isCurrentUserUser1: isUser1, user1Name, user2Name });
 }

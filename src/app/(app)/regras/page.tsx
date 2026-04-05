@@ -32,6 +32,7 @@ interface Rule {
   pctUser2: number;
   priority: number;
   isActive: boolean;
+  creatorIsUser1: boolean;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -194,7 +195,10 @@ export default function RegrasPage() {
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {FIELD_LABELS[rule.matchField]} &quot;{rule.matchValue}&quot;
                   {" → "}
-                  {user1Name ?? "você"}: {Number(rule.pctUser1)}% / {user2Name ?? "parceiro(a)"}: {Number(rule.pctUser2)}%
+                  {rule.creatorIsUser1
+                    ? <><strong>{user1Name ?? "você"}: {Number(rule.pctUser1)}%</strong> / {user2Name ?? "parceiro(a)"}: {Number(rule.pctUser2)}%</>
+                    : <>{user1Name ?? "você"}: {Number(rule.pctUser1)}% / <strong>{user2Name ?? "parceiro(a)"}: {Number(rule.pctUser2)}%</strong></>
+                  }
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
