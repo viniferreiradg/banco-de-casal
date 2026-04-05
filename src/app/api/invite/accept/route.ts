@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     }),
     prisma.user.update({
       where: { id: user.id },
-      data: { coupleId: invite.coupleId },
+      data: { coupleId: invite.coupleId, onboardingCompleted: true },
     }),
   ]);
 
