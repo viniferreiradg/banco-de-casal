@@ -71,7 +71,8 @@ export async function POST(request: NextRequest) {
 
   const rule = await prisma.splitRule.create({
     data: {
-      ...(coupleId ? { coupleId } : { userId }),
+      ...(coupleId ? { coupleId } : {}),
+      userId, // sempre guardar quem criou
       name,
       matchField,
       matchValue: matchValue.toLowerCase(),
