@@ -6,11 +6,20 @@ async function getOwnerAndUser1(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   const coupleId = user?.coupleId ?? null;
   let isUser1 = true;
+  let user1Name: string | null = null;
+  let user2Name: string | null = null;
   if (coupleId) {
-    const couple = await prisma.couple.findUnique({ where: { id: coupleId } });
+    const couple = await prisma.couple.findUnique({
+      where: { id: coupleId },
+      include: { members: { select: { id: true, name: true } } },
+    });
     if (couple?.user1Id) isUser1 = userId === couple.user1Id;
+    const u1 = couple?.members.find((m) => m.id === couple.user1Id);
+    const u2 = couple?.members.find((m) => m.id !== couple.user1Id);
+    user1Name = u1?.name ?? null;
+    user2Name = u2?.name ?? null;
   }
-  return { coupleId, userId, isUser1 };
+  return { coupleId, userId, isUser1, user1Name, user2Name };
 }
 
 // GET /api/rules
@@ -19,14 +28,14 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { coupleId, userId, isUser1 } = await getOwnerAndUser1(user.id);
+  const { coupleId, userId, isUser1, user1Name, user2Name } = await getOwnerAndUser1(user.id);
 
   const rules = await prisma.splitRule.findMany({
     where: coupleId ? { coupleId } : { userId },
     orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
   });
 
-  return NextResponse.json({ rules, isCurrentUserUser1: isUser1 });
+  return NextResponse.json({ rules, isCurrentUserUser1: isUser1, user1Name, user2Name });
 }
 
 // POST /api/rules

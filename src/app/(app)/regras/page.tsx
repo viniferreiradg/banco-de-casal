@@ -47,6 +47,8 @@ export default function RegrasPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Rule | null>(null);
   const [isCurrentUserUser1, setIsCurrentUserUser1] = useState(true);
+  const [user1Name, setUser1Name] = useState<string | null>(null);
+  const [user2Name, setUser2Name] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -65,6 +67,8 @@ export default function RegrasPage() {
     const [rulesData, catData] = await Promise.all([rulesRes.json(), catRes.json()]);
     setRules(rulesData.rules ?? []);
     if (rulesData.isCurrentUserUser1 !== undefined) setIsCurrentUserUser1(rulesData.isCurrentUserUser1);
+    if (rulesData.user1Name) setUser1Name(rulesData.user1Name);
+    if (rulesData.user2Name) setUser2Name(rulesData.user2Name);
     setCategories(catData.categories ?? []);
     setLoading(false);
   }, []);
@@ -190,7 +194,7 @@ export default function RegrasPage() {
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {FIELD_LABELS[rule.matchField]} &quot;{rule.matchValue}&quot;
                   {" → "}
-                  <strong>{isCurrentUserUser1 ? Number(rule.pctUser1) : Number(rule.pctUser2)}% você</strong> / {isCurrentUserUser1 ? Number(rule.pctUser2) : Number(rule.pctUser1)}% parceiro(a)
+                  <strong>{Number(rule.pctUser1)}% {user1Name ?? "você"}</strong> / {Number(rule.pctUser2)}% {user2Name ?? "parceiro(a)"}
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
@@ -291,8 +295,8 @@ export default function RegrasPage() {
                 className="w-full"
               />
               <div className="flex justify-between text-xs text-muted-foreground">
-                <span>Você: {form.pctUser1}%</span>
-                <span>Parceiro(a): {100 - form.pctUser1}%</span>
+                <span>{isCurrentUserUser1 ? (user1Name ?? "Você") : (user2Name ?? "Você")}: {form.pctUser1}%</span>
+                <span>{isCurrentUserUser1 ? (user2Name ?? "Parceiro(a)") : (user1Name ?? "Parceiro(a)")}: {100 - form.pctUser1}%</span>
               </div>
             </div>
 
