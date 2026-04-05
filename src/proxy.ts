@@ -43,6 +43,8 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/api/invite") ||
     pathname.startsWith("/api/onboarding");
 
+  const isConvitePage = pathname.startsWith("/convite");
+
   if (!user && !isAuthRoute && !isPublicApiRoute && !isOnboarding) {
     if (!isApiRoute) {
       return NextResponse.redirect(new URL("/login", request.url));

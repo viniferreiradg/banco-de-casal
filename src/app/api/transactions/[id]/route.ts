@@ -16,9 +16,14 @@ export async function PATCH(
 
   const transaction = await prisma.transaction.findUnique({
     where: { id },
-    include: { bankConnection: true },
+    include: {
+      bankConnection: { include: { user: { include: { couple: { select: { user1Id: true } } } } } },
+    },
   });
   if (!transaction) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const user1Id = transaction.bankConnection.user.couple?.user1Id ?? null;
+  const currentUserIsUser1 = user1Id ? user.id === user1Id : true;
 
   const body = await request.json();
 
@@ -31,8 +36,11 @@ export async function PATCH(
   if (body.pendingReview !== undefined) txUpdate.pendingReview = body.pendingReview;
 
   // Update split if percentages provided
+  // body.pctUser1 = "minha porcentagem" (perspectiva do usuário logado)
+  // Converter para pctUser1 do casal (sempre = user1 do casal)
   if (body.pctUser1 !== undefined) {
-    const pctUser1 = new Decimal(body.pctUser1);
+    const myPct = new Decimal(body.pctUser1);
+    const pctUser1 = currentUserIsUser1 ? myPct : new Decimal(100).minus(myPct);
     const pctUser2 = new Decimal(100).minus(pctUser1);
     const amountUser1 = transaction.amount.mul(pctUser1).div(100).toDecimalPlaces(2);
     const amountUser2 = transaction.amount.minus(amountUser1);

@@ -32,6 +32,7 @@ model User {
 model Couple {
   id         String   @id @default(cuid())
   closingDay Int      @default(5) // day of month when credit card cycle closes
+  user1Id    String?  // ID do primeiro membro (quem criou o casal)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

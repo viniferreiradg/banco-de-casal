@@ -56,6 +56,7 @@ export default async function ResumoPage({
   const from = new Date(year, mon - 1, 1);
   const to = new Date(year, mon, 0, 23, 59, 59);
   const partner = dbUser.couple!.members.find((m) => m.id !== user.id);
+  const isUser1 = dbUser.couple!.user1Id ? user.id === dbUser.couple!.user1Id : true;
 
   const transactions = await prisma.transaction.findMany({
     where: {
@@ -74,15 +75,11 @@ export default async function ResumoPage({
 
   for (const tx of transactions) {
     if (!tx.split) continue;
-    if (tx.ownerUserId === user.id) {
-      myTotal = myTotal.plus(tx.split.amountUser1);
-      partnerTotal = partnerTotal.plus(tx.split.amountUser2);
-      paidByMe = paidByMe.plus(tx.amount);
-    } else {
-      myTotal = myTotal.plus(tx.split.amountUser2);
-      partnerTotal = partnerTotal.plus(tx.split.amountUser1);
-      paidByPartner = paidByPartner.plus(tx.amount);
-    }
+    // amountUser1 = sempre a parte do user1 do casal (fixo, independente de quem comprou)
+    myTotal = myTotal.plus(isUser1 ? tx.split.amountUser1 : tx.split.amountUser2);
+    partnerTotal = partnerTotal.plus(isUser1 ? tx.split.amountUser2 : tx.split.amountUser1);
+    if (tx.ownerUserId === user.id) paidByMe = paidByMe.plus(tx.amount);
+    else paidByPartner = paidByPartner.plus(tx.amount);
   }
 
   const balance = myTotal.minus(paidByMe);

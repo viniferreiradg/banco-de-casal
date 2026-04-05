@@ -46,6 +46,7 @@ export default function RegrasPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Rule | null>(null);
+  const [isCurrentUserUser1, setIsCurrentUserUser1] = useState(true);
 
   const [form, setForm] = useState({
     name: "",
@@ -63,6 +64,7 @@ export default function RegrasPage() {
     ]);
     const [rulesData, catData] = await Promise.all([rulesRes.json(), catRes.json()]);
     setRules(rulesData.rules ?? []);
+    if (rulesData.isCurrentUserUser1 !== undefined) setIsCurrentUserUser1(rulesData.isCurrentUserUser1);
     setCategories(catData.categories ?? []);
     setLoading(false);
   }, []);
@@ -77,11 +79,13 @@ export default function RegrasPage() {
 
   function openEdit(rule: Rule) {
     setEditing(rule);
+    // Mostrar a pct do usuário atual: user1 vê pctUser1, user2 vê pctUser2
+    const myPct = isCurrentUserUser1 ? Number(rule.pctUser1) : Number(rule.pctUser2);
     setForm({
       name: rule.name,
       matchField: rule.matchField,
       matchValue: rule.matchValue,
-      pctUser1: Number(rule.pctUser1),
+      pctUser1: myPct,
       priority: rule.priority,
     });
     setOpen(true);
@@ -186,7 +190,7 @@ export default function RegrasPage() {
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {FIELD_LABELS[rule.matchField]} &quot;{rule.matchValue}&quot;
                   {" → "}
-                  <strong>{Number(rule.pctUser1)}% você</strong> / {Number(rule.pctUser2)}% parceiro(a)
+                  <strong>{isCurrentUserUser1 ? Number(rule.pctUser1) : Number(rule.pctUser2)}% você</strong> / {isCurrentUserUser1 ? Number(rule.pctUser2) : Number(rule.pctUser1)}% parceiro(a)
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">

@@ -27,6 +27,7 @@ export default async function DashboardPage() {
   });
 
   const isSolo = !dbUser?.coupleId;
+  const isUser1 = dbUser?.couple?.user1Id ? user.id === dbUser.couple.user1Id : true;
   const now = new Date();
   const currentMonth = format(now, "yyyy-MM");
   const from = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -65,14 +66,10 @@ export default async function DashboardPage() {
     let paidByMe = new Decimal(0);
     for (const tx of allMonthTx) {
       if (!tx.split) continue;
-      if (tx.ownerUserId === user.id) {
-        myTotal = myTotal.plus(tx.split.amountUser1);
-        partnerTotal = partnerTotal.plus(tx.split.amountUser2);
-        paidByMe = paidByMe.plus(tx.amount);
-      } else {
-        myTotal = myTotal.plus(tx.split.amountUser2);
-        partnerTotal = partnerTotal.plus(tx.split.amountUser1);
-      }
+      // amountUser1 = sempre a parte do user1 do casal (fixo)
+      myTotal = myTotal.plus(isUser1 ? tx.split.amountUser1 : tx.split.amountUser2);
+      partnerTotal = partnerTotal.plus(isUser1 ? tx.split.amountUser2 : tx.split.amountUser1);
+      if (tx.ownerUserId === user.id) paidByMe = paidByMe.plus(tx.amount);
     }
     balance = myTotal.minus(paidByMe);
   }

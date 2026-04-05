@@ -107,6 +107,7 @@ export default function TransacoesPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isCurrentUserUser1, setIsCurrentUserUser1] = useState(true);
   const [hidePartnerPersonal, setHidePartnerPersonal] = useState(true);
 
   // Inline row entry
@@ -141,6 +142,7 @@ export default function TransacoesPage() {
     const [txData, bankData, catData] = await Promise.all([txRes.json(), bankRes.json(), catRes.json()]);
     setTransactions(txData.transactions ?? []);
     if (txData.currentUserId) setCurrentUserId(txData.currentUserId);
+    if (txData.isCurrentUserUser1 !== undefined) setIsCurrentUserUser1(txData.isCurrentUserUser1);
     setBankConnections(bankData.connections ?? []);
     setCategories(catData.categories ?? []);
     setLoading(false);
@@ -251,7 +253,11 @@ export default function TransacoesPage() {
 
   function openEdit(tx: Transaction) {
     setEditing(tx);
-    setEditPct(tx.split ? String(tx.split.pctUser1) : "50");
+    // Mostrar a pct do usuário atual (não sempre user1)
+    const myPct = tx.split
+      ? (isCurrentUserUser1 ? tx.split.pctUser1 : tx.split.pctUser2)
+      : 50;
+    setEditPct(String(myPct));
     setEditCustomName(tx.customName ?? "");
     setEditCategory(tx.category ?? "");
     setEditNotes(tx.notes ?? "");
@@ -366,8 +372,8 @@ export default function TransacoesPage() {
   const pendingCount = filtered.filter((tx) => tx.pendingReview).length;
   const confirmed = filtered.filter((tx) => !tx.pendingReview);
   const totalShared = confirmed.filter((tx) => tx.isShared).reduce((s, tx) => s + Number(tx.amount), 0);
-  const myShare = confirmed.filter((tx) => tx.isShared && tx.split).reduce((s, tx) => s + Number(tx.split!.amountUser1), 0);
-  const partnerShare = confirmed.filter((tx) => tx.isShared && tx.split).reduce((s, tx) => s + Number(tx.split!.amountUser2), 0);
+  const myShare = confirmed.filter((tx) => tx.isShared && tx.split).reduce((s, tx) => s + Number(isCurrentUserUser1 ? tx.split!.amountUser1 : tx.split!.amountUser2), 0);
+  const partnerShare = confirmed.filter((tx) => tx.isShared && tx.split).reduce((s, tx) => s + Number(isCurrentUserUser1 ? tx.split!.amountUser2 : tx.split!.amountUser1), 0);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-4">
@@ -645,12 +651,12 @@ export default function TransacoesPage() {
                     </TableCell>
                     <TableCell className="text-right text-sm">
                       {tx.isShared && tx.split
-                        ? formatBRL(Number(tx.split.amountUser1))
+                        ? formatBRL(Number(isCurrentUserUser1 ? tx.split.amountUser1 : tx.split.amountUser2))
                         : <span className="text-muted-foreground text-xs">pessoal</span>}
                     </TableCell>
                     <TableCell className="text-right text-sm text-muted-foreground">
                       {tx.isShared && tx.split
-                        ? formatBRL(Number(tx.split.amountUser2))
+                        ? formatBRL(Number(isCurrentUserUser1 ? tx.split.amountUser2 : tx.split.amountUser1))
                         : <span className="text-xs">—</span>}
                     </TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">

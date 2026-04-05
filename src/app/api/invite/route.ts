@@ -17,12 +17,16 @@ export async function POST() {
 
   if (!couple) {
     couple = await prisma.couple.create({
-      data: { members: { connect: { id: dbUser.id } } },
+      data: { members: { connect: { id: dbUser.id } }, user1Id: dbUser.id },
     });
     await prisma.user.update({
       where: { id: dbUser.id },
       data: { coupleId: couple.id },
     });
+  } else if (!couple.user1Id) {
+    // Backfill: se o casal já existia sem user1Id, seta quem gerou o convite
+    await prisma.couple.update({ where: { id: couple.id }, data: { user1Id: dbUser.id } });
+    couple = { ...couple, user1Id: dbUser.id };
   }
 
   // Invalidate any existing pending invites

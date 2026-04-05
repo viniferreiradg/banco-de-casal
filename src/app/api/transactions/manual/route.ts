@@ -28,6 +28,9 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  const user1Id = bankConnection?.user.couple?.user1Id ?? null;
+  const ownerIsUser1 = user1Id ? user.id === user1Id : true;
+
   if (!bankConnection || bankConnection.userId !== user.id) {
     return NextResponse.json({ error: "Conta bancária não encontrada" }, { status: 404 });
   }
@@ -43,7 +46,9 @@ export async function POST(request: NextRequest) {
 
   let split;
   if (pctUser1 !== undefined) {
-    const p1 = new Decimal(pctUser1);
+    // pctUser1 enviado pela UI = "minha porcentagem". Converter para user1 do casal.
+    const myPct = new Decimal(pctUser1);
+    const p1 = ownerIsUser1 ? myPct : new Decimal(100).minus(myPct);
     const p2 = new Decimal(100).minus(p1);
     const a1 = decimalAmount.mul(p1).div(100).toDecimalPlaces(2);
     const a2 = decimalAmount.minus(a1);
@@ -55,6 +60,7 @@ export async function POST(request: NextRequest) {
         category: category ?? null,
         amount: decimalAmount,
         accountType: bankConnection.accountType as "SHARED" | "PERSONAL",
+        ownerIsUser1,
       },
       rules as Parameters<typeof applySplitRules>[1]
     );

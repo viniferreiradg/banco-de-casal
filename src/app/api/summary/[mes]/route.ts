@@ -20,6 +20,8 @@ export async function GET(
   });
   if (!dbUser?.coupleId) return NextResponse.json({ error: "Sem casal vinculado" }, { status: 400 });
 
+  const isUser1 = dbUser.couple?.user1Id ? user.id === dbUser.couple.user1Id : true;
+
   const [year, mon] = mes.split("-").map(Number);
   const from = new Date(year, mon - 1, 1);
   const to = new Date(year, mon, 0, 23, 59, 59);
@@ -40,24 +42,19 @@ export async function GET(
 
   for (const tx of transactions) {
     if (!tx.split) continue;
-    // user1 = the authenticated user
-    if (tx.ownerUserId === user.id) {
-      totalUser1 = totalUser1.plus(tx.split.amountUser1);
-      totalUser2 = totalUser2.plus(tx.split.amountUser2);
-    } else {
-      // The other member paid, flip perspective
-      totalUser2 = totalUser2.plus(tx.split.amountUser1);
-      totalUser1 = totalUser1.plus(tx.split.amountUser2);
-    }
+    // amountUser1 = sempre a parte do user1 do casal (fixo, independente de quem comprou)
+    totalUser1 = totalUser1.plus(tx.split.amountUser1);
+    totalUser2 = totalUser2.plus(tx.split.amountUser2);
   }
 
-  // balance: positive = current user owes partner, negative = partner owes current user
-  // Logic: user1 paid X but should only pay totalUser1. Excess is owed back.
+  // balance: quanto o usuário atual deve ou tem a receber
+  // "currentUser" pode ser user1 ou user2 — totalUser1 é sempre do user1 do casal
+  const myTotal = isUser1 ? totalUser1 : totalUser2;
   const paidByUser1 = transactions
     .filter((tx) => tx.ownerUserId === user.id)
     .reduce((sum, tx) => sum.plus(tx.amount), new Decimal(0));
 
-  const balance = totalUser1.minus(paidByUser1);
+  const balance = myTotal.minus(paidByUser1);
 
   // Upsert the summary
   const summary = await prisma.monthlySummary.upsert({

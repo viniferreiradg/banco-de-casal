@@ -14,12 +14,14 @@ export async function GET(request: NextRequest) {
   const month = request.nextUrl.searchParams.get("month") ?? format(new Date(), "yyyy-MM");
 
   let memberIds: string[] = [user.id];
+  let isCurrentUserUser1 = true;
   if (dbUser?.coupleId) {
     const couple = await prisma.couple.findUnique({
       where: { id: dbUser.coupleId },
       include: { members: { select: { id: true } } },
     });
     memberIds = couple?.members.map((m) => m.id) ?? [user.id];
+    if (couple?.user1Id) isCurrentUserUser1 = user.id === couple.user1Id;
   }
 
   // Credit card transactions: filter by billingMonth
@@ -46,5 +48,5 @@ export async function GET(request: NextRequest) {
     orderBy: { date: "desc" },
   });
 
-  return NextResponse.json({ transactions, currentUserId: user.id });
+  return NextResponse.json({ transactions, currentUserId: user.id, isCurrentUserUser1 });
 }

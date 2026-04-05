@@ -12,14 +12,22 @@ export async function PATCH(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    include: { couple: { select: { user1Id: true } } },
+  });
+  const isUser1 = dbUser?.couple?.user1Id ? user.id === dbUser.couple.user1Id : true;
+
   const body = await request.json();
   const update: Record<string, unknown> = {};
   if (body.name !== undefined) update.name = body.name;
   if (body.matchField !== undefined) update.matchField = body.matchField;
   if (body.matchValue !== undefined) update.matchValue = body.matchValue.toLowerCase();
   if (body.pctUser1 !== undefined) {
-    update.pctUser1 = body.pctUser1;
-    update.pctUser2 = 100 - body.pctUser1;
+    // body.pctUser1 = "minha porcentagem". Converter para pctUser1 do casal.
+    const pctUser1 = isUser1 ? body.pctUser1 : 100 - body.pctUser1;
+    update.pctUser1 = pctUser1;
+    update.pctUser2 = 100 - pctUser1;
   }
   if (body.priority !== undefined) update.priority = body.priority;
   if (body.isActive !== undefined) update.isActive = body.isActive;

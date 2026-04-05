@@ -6,6 +6,7 @@ export interface TransactionInput {
   category: string | null;
   amount: Decimal;
   accountType: AccountType;
+  ownerIsUser1?: boolean; // true = dono é user1 do casal; afeta o default de conta pessoal
 }
 
 export interface SplitResult {
@@ -33,10 +34,15 @@ export function applySplitRules(
     }
   }
 
-  // Default: shared account → 50/50, personal → 100/0
-  const defaultPct1 = transaction.accountType === "SHARED"
-    ? new Decimal(50)
-    : new Decimal(100);
+  // Default: shared → 50/50; personal → 100% para quem é o dono
+  // user1 paga 100% se for o dono, 0% se for o parceiro
+  let defaultPct1: Decimal;
+  if (transaction.accountType === "SHARED") {
+    defaultPct1 = new Decimal(50);
+  } else {
+    // Se ownerIsUser1 não for informado, assume que o dono é user1 (comportamento legado)
+    defaultPct1 = transaction.ownerIsUser1 !== false ? new Decimal(100) : new Decimal(0);
+  }
   const defaultPct2 = new Decimal(100).minus(defaultPct1);
 
   return computeSplit(transaction.amount, defaultPct1, defaultPct2, null);
