@@ -30,7 +30,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { ChevronLeft, ChevronRight, Pencil, Plus, Upload, CreditCard, Check, X, AlertTriangle, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pencil, Plus, Upload, CreditCard, Check, X, AlertTriangle, Trash2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/ui/category-combobox";
 
@@ -106,6 +106,8 @@ export default function TransacoesPage() {
   const [categories, setCategories] = useState<{ id: string; name: string; icon: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [hidePartnerPersonal, setHidePartnerPersonal] = useState(true);
 
   // Inline row entry
   const [inlineRows, setInlineRows] = useState<InlineRow[]>([]);
@@ -138,6 +140,7 @@ export default function TransacoesPage() {
     ]);
     const [txData, bankData, catData] = await Promise.all([txRes.json(), bankRes.json(), catRes.json()]);
     setTransactions(txData.transactions ?? []);
+    if (txData.currentUserId) setCurrentUserId(txData.currentUserId);
     setBankConnections(bankData.connections ?? []);
     setCategories(catData.categories ?? []);
     setLoading(false);
@@ -349,6 +352,9 @@ export default function TransacoesPage() {
   // ── Derived values ───────────────────────────────────────────
 
   const filtered = transactions.filter((tx) => {
+    if (hidePartnerPersonal && currentUserId && tx.owner.id !== currentUserId && !tx.isShared) {
+      return false;
+    }
     const search = filter.toLowerCase();
     return (
       tx.description.toLowerCase().includes(search) ||
@@ -427,11 +433,22 @@ export default function TransacoesPage() {
         </div>
       )}
 
-      <Input
-        placeholder="Filtrar por nome, apelido ou categoria..."
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-      />
+      <div className="flex items-center gap-2">
+        <Input
+          placeholder="Filtrar por nome, apelido ou categoria..."
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <Button
+          variant={hidePartnerPersonal ? "outline" : "secondary"}
+          size="sm"
+          onClick={() => setHidePartnerPersonal((v) => !v)}
+          className="shrink-0 gap-1.5"
+        >
+          {hidePartnerPersonal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+          {hidePartnerPersonal ? "Pessoais ocultos" : "Ver todos"}
+        </Button>
+      </div>
 
       {/* Table */}
       <div className="rounded-md border overflow-x-auto">

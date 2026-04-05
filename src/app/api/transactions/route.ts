@@ -46,5 +46,5 @@ export async function GET(request: NextRequest) {
     orderBy: { date: "desc" },
   });
 
-  return NextResponse.json({ transactions });
+  return NextResponse.json({ transactions, currentUserId: user.id });
 }
