@@ -194,7 +194,7 @@ export default function RegrasPage() {
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {FIELD_LABELS[rule.matchField]} &quot;{rule.matchValue}&quot;
                   {" → "}
-                  <strong>{Number(rule.pctUser1)}% {user1Name ?? "você"}</strong> / {Number(rule.pctUser2)}% {user2Name ?? "parceiro(a)"}
+                  {user1Name ?? "você"}: {Number(rule.pctUser1)}% / {user2Name ?? "parceiro(a)"}: {Number(rule.pctUser2)}%
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
