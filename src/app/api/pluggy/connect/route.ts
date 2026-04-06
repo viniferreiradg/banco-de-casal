@@ -9,10 +9,11 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { itemId, accountType, isCreditCard } = await request.json();
+  const { itemId, accountType, isCreditCard, nickname } = await request.json();
   if (!itemId) return NextResponse.json({ error: "itemId required" }, { status: 400 });
 
   const item = await getItem(itemId);
+  const cleanNickname = nickname?.trim() || null;
 
   const connection = await prisma.bankConnection.upsert({
     where: { pluggyItemId: itemId },
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
       bankLogo: item.connector?.imageUrl ?? null,
       accountType: accountType ?? "PERSONAL",
       isCreditCard: isCreditCard ?? false,
+      nickname: cleanNickname,
     },
     create: {
       pluggyItemId: itemId,
@@ -29,6 +31,7 @@ export async function POST(request: NextRequest) {
       bankLogo: item.connector?.imageUrl ?? null,
       accountType: accountType ?? "PERSONAL",
       isCreditCard: isCreditCard ?? false,
+      nickname: cleanNickname,
       userId: user.id,
     },
   });

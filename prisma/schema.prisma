@@ -65,6 +65,7 @@ model BankConnection {
   id           String               @id @default(cuid())
   pluggyItemId String               @unique
   bankName     String
+  nickname     String?              // user-defined display name (overrides bankName in UI)
   bankLogo     String?
   accountType  AccountType          @default(PERSONAL)
   isCreditCard Boolean              @default(false)

@@ -21,8 +21,10 @@ export async function DELETE(
     where: { bankConnectionId: id },
   });
 
-  // Remove from Pluggy if it's a real connection
-  await deleteItem(conn.pluggyItemId).catch(() => null);
+  // Remove from Pluggy only for automatic connections
+  if (!conn.isManual) {
+    await deleteItem(conn.pluggyItemId).catch(() => null);
+  }
 
   if (txCount === 0) {
     await prisma.bankConnection.delete({ where: { id } });

@@ -30,6 +30,9 @@ export async function POST(request: NextRequest) {
 
   if (!bankConnection) return NextResponse.json({ ok: true });
 
+  // Skip manual connections — they don't have real Pluggy items
+  if (bankConnection.isManual) return NextResponse.json({ ok: true });
+
   await syncBankConnection(bankConnection);
 
   return NextResponse.json({ ok: true });
@@ -40,9 +43,11 @@ export async function syncBankConnection(bankConnection: {
   pluggyItemId: string;
   accountType: "SHARED" | "PERSONAL";
   isCreditCard?: boolean;
+  isManual?: boolean;
   user: {
     id: string;
     couple: {
+      user1Id: string | null;
       closingDay: number;
       splitRules: Array<{
         id: string;
@@ -55,11 +60,21 @@ export async function syncBankConnection(bankConnection: {
       }>;
     } | null;
   };
-}) {
+}): Promise<number> {
+  // Skip manual connections — no Pluggy data to fetch
+  if (bankConnection.isManual) return 0;
+
   const accounts = await getAccounts(bankConnection.pluggyItemId);
   const rules = bankConnection.user.couple?.splitRules ?? [];
   const closingDay = bankConnection.user.couple?.closingDay ?? 5;
   const isCreditCard = bankConnection.isCreditCard ?? false;
+
+  // Determine if the connection owner is user1 of the couple (affects personal account splits)
+  const ownerIsUser1 = bankConnection.user.couple
+    ? bankConnection.user.id === bankConnection.user.couple.user1Id
+    : true;
+
+  let newCount = 0;
 
   for (const account of accounts.results ?? []) {
     const now = new Date();
@@ -85,6 +100,7 @@ export async function syncBankConnection(bankConnection: {
           category: ptx.category,
           amount,
           accountType: bankConnection.accountType as "SHARED" | "PERSONAL",
+          ownerIsUser1,
         },
         rules as Parameters<typeof applySplitRules>[1]
       );
@@ -112,6 +128,8 @@ export async function syncBankConnection(bankConnection: {
           },
         },
       });
+
+      newCount++;
     }
   }
 
@@ -119,4 +137,6 @@ export async function syncBankConnection(bankConnection: {
     where: { id: bankConnection.id },
     data: { lastSyncAt: new Date() },
   });
+
+  return newCount;
 }

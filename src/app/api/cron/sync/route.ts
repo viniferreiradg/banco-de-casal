@@ -4,8 +4,9 @@ import { syncBankConnection } from "@/app/api/pluggy/webhook/route";
 
 // GET /api/cron/sync — called daily by Vercel Cron
 export async function GET() {
+  // Only sync automatic (non-manual) active connections
   const connections = await prisma.bankConnection.findMany({
-    where: { status: "ACTIVE" },
+    where: { status: "ACTIVE", isManual: false },
     include: {
       user: {
         include: {
@@ -23,10 +24,13 @@ export async function GET() {
         id: conn.id,
         pluggyItemId: conn.pluggyItemId,
         accountType: conn.accountType as "SHARED" | "PERSONAL",
+        isCreditCard: conn.isCreditCard,
+        isManual: conn.isManual,
         user: {
           id: conn.userId,
           couple: conn.user.couple
             ? {
+                user1Id: conn.user.couple.user1Id,
                 closingDay: conn.user.couple.closingDay,
                 splitRules: conn.user.couple.splitRules.map((r) => ({
                   ...r,

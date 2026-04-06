@@ -17,16 +17,11 @@ import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-declare global {
-  interface Window {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    PluggyConnect: any;
-  }
-}
 
 interface BankConnection {
   id: string;
   bankName: string;
+  nickname: string | null;
   bankLogo: string | null;
   accountType: string;
   isCreditCard: boolean;
@@ -46,7 +41,11 @@ export default function ContasPage() {
   const [isCreditCard, setIsCreditCard] = useState(false);
   const [connectionMode, setConnectionMode] = useState<"MANUAL" | "AUTOMATIC">("MANUAL");
   const [manualBankName, setManualBankName] = useState("");
+  const [nickname, setNickname] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<{ id: string; count: number } | null>(null);
+  const [widgetError, setWidgetError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,39 +60,68 @@ export default function ContasPage() {
 
   async function openPluggyWidget() {
     setConnecting(true);
-    const res = await fetch("/api/pluggy/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    const { accessToken } = await res.json();
+    setWidgetError(null);
+    // Close dialog first — shadcn Dialog has a focus trap that blocks external overlays
+    setConnectOpen(false);
 
-    // Load Pluggy Connect widget script dynamically
-    if (!document.getElementById("pluggy-script")) {
-      const script = document.createElement("script");
-      script.id = "pluggy-script";
-      script.src = "https://cdn.pluggy.ai/pluggy-connect/v3/pluggy-connect.js";
-      document.body.appendChild(script);
-      await new Promise((resolve) => { script.onload = resolve; });
+    try {
+      const res = await fetch("/api/pluggy/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? `Erro ao obter token (${res.status})`);
+      }
+
+      const { accessToken } = await res.json();
+      if (!accessToken) throw new Error("Token não retornado pela API");
+
+      // Dynamic import — pluggy-connect-sdk uses 'window', must run client-side only
+      const { PluggyConnect } = await import("pluggy-connect-sdk");
+
+      const savedNickname = nickname.trim() || null;
+
+      const pluggy = new PluggyConnect({
+        connectToken: accessToken,
+        includeSandbox: true, // show sandbox connectors (e.g. "Pluggy Bank")
+        onSuccess: async ({ item }: { item: { id: string } }) => {
+          const connectRes = await fetch("/api/pluggy/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ itemId: item.id, accountType, isCreditCard, nickname: savedNickname }),
+          });
+          const { connection } = await connectRes.json();
+          setConnecting(false);
+          await load();
+
+          if (connection?.id) {
+            setSyncingId(connection.id);
+            const syncRes = await fetch(`/api/bank-connections/${connection.id}/sync`, { method: "POST" });
+            const syncData = await syncRes.json();
+            setSyncingId(null);
+            if (syncData.newTransactions > 0) {
+              setSyncResult({ id: connection.id, count: syncData.newTransactions });
+              setTimeout(() => setSyncResult(null), 5000);
+            }
+            await load();
+          }
+        },
+        onError: (err: unknown) => {
+          console.error("Pluggy widget error:", err);
+          setConnecting(false);
+        },
+        onClose: () => setConnecting(false),
+      });
+
+      await pluggy.init();
+    } catch (err) {
+      console.error("openPluggyWidget error:", err);
+      setWidgetError(err instanceof Error ? err.message : "Erro ao abrir widget");
+      setConnecting(false);
     }
-
-    const pluggy = new window.PluggyConnect({
-      connectToken: accessToken,
-      onSuccess: async ({ itemId }: { itemId: string }) => {
-        await fetch("/api/pluggy/connect", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ itemId, accountType, isCreditCard }),
-        });
-        setConnectOpen(false);
-        setConnecting(false);
-        load();
-      },
-      onError: () => setConnecting(false),
-      onClose: () => setConnecting(false),
-    });
-
-    pluggy.init();
   }
 
   async function saveManualConnection() {
@@ -102,12 +130,24 @@ export default function ContasPage() {
     await fetch("/api/bank-connections/manual", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bankName: manualBankName.trim(), accountType, isCreditCard }),
+      body: JSON.stringify({ bankName: manualBankName.trim(), nickname: nickname.trim() || null, accountType, isCreditCard }),
     });
     setConnectOpen(false);
     setConnecting(false);
     setManualBankName("");
+    setNickname("");
     load();
+  }
+
+  async function syncConnection(id: string) {
+    setSyncingId(id);
+    setSyncResult(null);
+    const res = await fetch(`/api/bank-connections/${id}/sync`, { method: "POST" });
+    const data = await res.json();
+    setSyncingId(null);
+    setSyncResult({ id, count: data.newTransactions ?? 0 });
+    setTimeout(() => setSyncResult(null), 5000);
+    await load();
   }
 
   async function convertToAutomatic(id: string) {
@@ -118,7 +158,6 @@ export default function ContasPage() {
       alert(`${data.pendingCount} transaç${data.pendingCount === 1 ? "ão ficou pendente" : "ões ficaram pendentes"} de revisão. Acesse Transações para confirmar.`);
     }
     load();
-    // Open Pluggy widget to link the real account
     setConnectOpen(true);
   }
 
@@ -148,6 +187,20 @@ export default function ContasPage() {
           Conectar banco
         </Button>
       </div>
+
+      {/* Widget loading / error indicator */}
+      {connecting && (
+        <div className="flex items-center gap-2 p-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-800 text-sm">
+          <RefreshCw className="size-4 animate-spin shrink-0" />
+          Abrindo widget do Pluggy...
+        </div>
+      )}
+      {widgetError && (
+        <div className="flex items-center justify-between p-3 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm">
+          <span>Erro: {widgetError}</span>
+          <button onClick={() => setWidgetError(null)} className="text-red-600 hover:text-red-800 text-xs underline">fechar</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">
@@ -185,12 +238,19 @@ export default function ContasPage() {
               <CardHeader className="py-3 px-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    {conn.bankLogo && (
+                    {conn.bankLogo ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={conn.bankLogo} alt={conn.bankName} className="size-8 rounded" />
+                    ) : (
+                      <div className="size-8 rounded bg-muted flex items-center justify-center">
+                        {conn.isCreditCard
+                          ? <CreditCard className="size-4 text-muted-foreground" />
+                          : <Landmark className="size-4 text-muted-foreground" />
+                        }
+                      </div>
                     )}
                     <div>
-                      <CardTitle className="text-sm">{conn.bankName}</CardTitle>
+                      <CardTitle className="text-sm">{conn.nickname ?? conn.bankName}</CardTitle>
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <Badge
                           className={`text-xs ${statusColors[conn.status] ?? ""}`}
@@ -213,6 +273,19 @@ export default function ContasPage() {
                         >
                           {conn.user.id === currentUserId ? "Você" : conn.user.name}
                         </Badge>
+                        {syncingId === conn.id && (
+                          <Badge variant="outline" className="text-xs gap-1 text-blue-600 border-blue-300">
+                            <RefreshCw className="size-3 animate-spin" />
+                            Sincronizando...
+                          </Badge>
+                        )}
+                        {syncResult?.id === conn.id && (
+                          <Badge variant="outline" className="text-xs text-green-700 border-green-300 bg-green-50">
+                            {syncResult.count > 0
+                              ? `+${syncResult.count} transaç${syncResult.count === 1 ? "ão" : "ões"}`
+                              : "Já atualizado"}
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -229,8 +302,15 @@ export default function ContasPage() {
                           <ArrowRightLeft className="size-3" />
                         </Button>
                       ) : (
-                        <Button variant="ghost" size="icon" className="size-7" title="Sincronizar agora">
-                          <RefreshCw className="size-3" />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          title="Sincronizar agora"
+                          disabled={syncingId === conn.id}
+                          onClick={() => syncConnection(conn.id)}
+                        >
+                          <RefreshCw className={cn("size-3", syncingId === conn.id && "animate-spin")} />
                         </Button>
                       )}
                       <Button
@@ -250,10 +330,14 @@ export default function ContasPage() {
                   <span>
                     {conn._count?.transactions ?? 0} transaç{(conn._count?.transactions ?? 0) === 1 ? "ão" : "ões"}
                   </span>
-                  {conn.lastSyncAt && (
+                  {conn.isManual ? (
+                    <span className="italic">Importação manual / CSV</span>
+                  ) : conn.lastSyncAt ? (
                     <span>
                       Sincronizado {format(new Date(conn.lastSyncAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                     </span>
+                  ) : (
+                    <span className="text-blue-500">Aguardando primeira sincronização...</span>
                   )}
                 </div>
               </CardContent>
@@ -263,7 +347,7 @@ export default function ContasPage() {
       )}
 
       {/* Connect dialog */}
-      <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
+      <Dialog open={connectOpen} onOpenChange={(open) => { setConnectOpen(open); if (!open) { setNickname(""); setManualBankName(""); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Adicionar conta</DialogTitle>
@@ -369,6 +453,18 @@ export default function ContasPage() {
                 />
               </div>
             )}
+
+            {/* Nickname — optional for both modes */}
+            <div className="space-y-2">
+              <Label>
+                Apelido <span className="text-muted-foreground text-xs">(opcional)</span>
+              </Label>
+              <Input
+                placeholder={connectionMode === "MANUAL" ? "ex: Nubank Débito, Inter CC..." : "ex: Cartão da Pati, Conta conjunta..."}
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+              />
+            </div>
 
             <Button
               className="w-full"
