@@ -11,7 +11,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const dbUser = await prisma.user.findUnique({
     where: { id: user.id },
-    select: { name: true, email: true, onboardingCompleted: true },
+    select: { name: true, email: true, onboardingCompleted: true, avatarUrl: true },
   });
 
   if (!dbUser?.onboardingCompleted) redirect("/onboarding");
@@ -21,6 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <AppSidebar
         userName={dbUser?.name ?? user.email ?? "Usuário"}
         userEmail={dbUser?.email ?? user.email ?? ""}
+        avatarUrl={dbUser?.avatarUrl ?? null}
       />
       <main className="flex-1 overflow-y-auto">
         {children}

@@ -31,8 +31,14 @@ export async function POST(request: NextRequest) {
   const user1Id = bankConnection?.user.couple?.user1Id ?? null;
   const ownerIsUser1 = user1Id ? user.id === user1Id : true;
 
-  if (!bankConnection || bankConnection.userId !== user.id) {
+  if (!bankConnection) {
     return NextResponse.json({ error: "Conta bancária não encontrada" }, { status: 404 });
+  }
+  // Conta pessoal: só o dono pode lançar. Conta compartilhada: qualquer membro do casal pode.
+  const isOwner = bankConnection.userId === user.id;
+  const isSharedAccount = bankConnection.accountType === "SHARED";
+  if (!isOwner && !isSharedAccount) {
+    return NextResponse.json({ error: "Sem permissão para lançar nesta conta" }, { status: 403 });
   }
 
   // Parse as local noon to avoid UTC offset shifting the date to the previous day
@@ -91,7 +97,11 @@ export async function POST(request: NextRequest) {
         },
       },
     },
-    include: { split: true },
+    include: {
+      split: { include: { appliedRule: { select: { name: true } } } },
+      bankConnection: { select: { id: true, bankName: true, accountType: true, isCreditCard: true } },
+      owner: { select: { id: true, name: true } },
+    },
   });
 
   return NextResponse.json({ transaction }, { status: 201 });

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(request: NextRequest) {
-  const { email, password, name } = await request.json();
+  const { email, password, name, nickname } = await request.json();
 
   if (!email || !password || !name) {
     return NextResponse.json({ error: "Campos obrigatórios ausentes" }, { status: 400 });
@@ -24,8 +24,8 @@ export async function POST(request: NextRequest) {
   try {
     await prisma.user.upsert({
       where: { id: data.user.id },
-      update: { name, email },
-      create: { id: data.user.id, email, name },
+      update: { name, email, ...(nickname ? { nickname: nickname.trim() } : {}) },
+      create: { id: data.user.id, email, name, ...(nickname ? { nickname: nickname.trim() } : {}) },
     });
   } catch (dbError) {
     console.error("Prisma error:", dbError);

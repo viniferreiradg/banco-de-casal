@@ -2,12 +2,21 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { InviteButton } from "./invite-button";
 import { EditName } from "./edit-name";
 import { CasalSettings } from "./casal-settings";
+import { AvatarUpload } from "./avatar-upload";
+
+function getInitials(name: string | null | undefined): string {
+  if (!name) return "??";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return parts.length > 1
+    ? (parts[0][0] + parts.at(-1)![0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase();
+}
 
 export default async function PerfilPage() {
   const supabase = await createClient();
@@ -18,13 +27,14 @@ export default async function PerfilPage() {
     where: { id: user.id },
     include: {
       couple: {
-        include: { members: { select: { id: true, name: true, email: true } } },
+        include: { members: { select: { id: true, name: true, email: true, avatarUrl: true } } },
       },
     },
   });
 
   const partner = dbUser?.couple?.members.find((m) => m.id !== user.id);
   const closingDay = dbUser?.couple?.closingDay ?? 5;
+  const initials = getInitials(dbUser?.name);
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
@@ -35,18 +45,17 @@ export default async function PerfilPage() {
         <CardHeader>
           <CardTitle className="text-base">Minha conta</CardTitle>
         </CardHeader>
-        <CardContent className="flex items-center gap-4">
-          <Avatar className="size-12">
-            <AvatarFallback>
-              {dbUser?.name?.slice(0, 2).toUpperCase() ?? "??"}
-            </AvatarFallback>
-          </Avatar>
-          <div className="space-y-3">
+        <CardContent className="flex items-start gap-6">
+          <AvatarUpload
+            currentAvatarUrl={dbUser?.avatarUrl ?? null}
+            initials={initials}
+          />
+          <div className="space-y-3 flex-1">
             <div>
               <p className="font-semibold">{dbUser?.name || dbUser?.email}</p>
               <p className="text-sm text-muted-foreground">{dbUser?.email}</p>
             </div>
-            <EditName currentName={dbUser?.name ?? ""} />
+            <EditName currentName={dbUser?.name ?? ""} currentNickname={dbUser?.nickname ?? ""} />
           </div>
         </CardContent>
       </Card>
@@ -73,8 +82,9 @@ export default async function PerfilPage() {
             <CardContent>
               <div className="flex items-center gap-3">
                 <Avatar className="size-10">
+                  {partner.avatarUrl && <AvatarImage src={partner.avatarUrl} alt={partner.name} className="object-cover" />}
                   <AvatarFallback>
-                    {partner.name.slice(0, 2).toUpperCase()}
+                    {getInitials(partner.name)}
                   </AvatarFallback>
                 </Avatar>
                 <div>

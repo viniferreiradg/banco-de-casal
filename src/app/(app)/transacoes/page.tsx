@@ -30,9 +30,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { ChevronLeft, ChevronRight, Pencil, Plus, Upload, CreditCard, Check, X, AlertTriangle, Trash2, Eye, EyeOff } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pencil, Plus, Upload, CreditCard, Check, X, AlertTriangle, Trash2, Eye, EyeOff, ChevronUp, ChevronDown, ChevronsUpDown, Landmark, Users } from "lucide-react";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/ui/category-combobox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 function Skeleton({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded bg-muted ${className ?? ""}`} />;
@@ -44,6 +45,8 @@ interface Split {
   amountUser1: number;
   amountUser2: number;
   isManualOverride: boolean;
+  appliedRuleId: string | null;
+  appliedRule: { name: string } | null;
 }
 
 interface Transaction {
@@ -69,12 +72,14 @@ interface BankConnection {
   bankName: string;
   accountType: string;
   isCreditCard: boolean;
+  user: { id: string; name: string };
 }
 
 interface InlineRow {
   uid: string;
   date: string;
   description: string;
+  alias: string;
   amount: string;
   category: string;
   bankConnectionId: string;
@@ -108,7 +113,20 @@ export default function TransacoesPage() {
   const [filter, setFilter] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [isCurrentUserUser1, setIsCurrentUserUser1] = useState(true);
+  const [myNickname, setMyNickname] = useState<string | null>(null);
+  const [partnerNickname, setPartnerNickname] = useState<string | null>(null);
   const [hidePartnerPersonal, setHidePartnerPersonal] = useState(true);
+  const [sortCol, setSortCol] = useState<"date" | "name" | "category" | "account" | "total" | "my" | "partner" | "pct">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  function handleSort(col: typeof sortCol) {
+    if (sortCol === col) {
+      setSortDir((d) => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  }
 
   // Inline row entry
   const [inlineRows, setInlineRows] = useState<InlineRow[]>([]);
@@ -124,6 +142,10 @@ export default function TransacoesPage() {
   const [editNotes, setEditNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Split popover (inline quick-edit)
+  const [splitPopover, setSplitPopover] = useState<{ txId: string; pct: number; originalPct: number } | null>(null);
+  const [savingSplitTxId, setSavingSplitTxId] = useState<string | null>(null);
+
   // CSV import dialog
   const [importOpen, setImportOpen] = useState(false);
   const [importBankId, setImportBankId] = useState("");
@@ -132,19 +154,39 @@ export default function TransacoesPage() {
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const loadTransactions = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/transactions?month=${month}`);
+      const data = await res.json();
+      setTransactions(data.transactions ?? []);
+      if (data.currentUserId) setCurrentUserId(data.currentUserId);
+      if (data.isCurrentUserUser1 !== undefined) setIsCurrentUserUser1(data.isCurrentUserUser1);
+      if (data.myNickname) setMyNickname(data.myNickname);
+      if (data.partnerNickname) setPartnerNickname(data.partnerNickname);
+    } catch (e) {
+      console.error("Erro ao carregar transações:", e);
+    }
+  }, [month]);
+
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
-    const [txRes, bankRes, catRes] = await Promise.all([
-      fetch(`/api/transactions?month=${month}`),
-      fetch("/api/bank-connections"),
-      fetch("/api/categories"),
-    ]);
-    const [txData, bankData, catData] = await Promise.all([txRes.json(), bankRes.json(), catRes.json()]);
-    setTransactions(txData.transactions ?? []);
-    if (txData.currentUserId) setCurrentUserId(txData.currentUserId);
-    if (txData.isCurrentUserUser1 !== undefined) setIsCurrentUserUser1(txData.isCurrentUserUser1);
-    setBankConnections(bankData.connections ?? []);
-    setCategories(catData.categories ?? []);
+    try {
+      const [txRes, bankRes, catRes] = await Promise.all([
+        fetch(`/api/transactions?month=${month}`),
+        fetch("/api/bank-connections"),
+        fetch("/api/categories"),
+      ]);
+      const [txData, bankData, catData] = await Promise.all([txRes.json(), bankRes.json(), catRes.json()]);
+      setTransactions(txData.transactions ?? []);
+      if (txData.currentUserId) setCurrentUserId(txData.currentUserId);
+      if (txData.isCurrentUserUser1 !== undefined) setIsCurrentUserUser1(txData.isCurrentUserUser1);
+      if (txData.myNickname) setMyNickname(txData.myNickname);
+      if (txData.partnerNickname) setPartnerNickname(txData.partnerNickname);
+      setBankConnections(bankData.connections ?? []);
+      setCategories(catData.categories ?? []);
+    } catch (e) {
+      console.error("Erro ao carregar transações:", e);
+    }
     setLoading(false);
   }, [month]);
 
@@ -168,9 +210,10 @@ export default function TransacoesPage() {
         uid,
         date: format(new Date(), "yyyy-MM-dd"),
         description: "",
+        alias: "",
         amount: "",
         category: "",
-        bankConnectionId: bankConnections[0]?.id ?? "",
+        bankConnectionId: bankConnections.find((b) => b.user.id === currentUserId || b.accountType === "SHARED")?.id ?? "",
       },
     ]);
     setFocusRowUid(uid);
@@ -198,6 +241,7 @@ export default function TransacoesPage() {
       body: JSON.stringify({
         date: row.date,
         description: row.description.trim(),
+        customName: row.alias.trim() || null,
         amount: Number(row.amount),
         category: row.category.trim() || null,
         bankConnectionId: row.bankConnectionId,
@@ -207,6 +251,19 @@ export default function TransacoesPage() {
     setSavingRows((prev) => { const s = new Set(prev); s.delete(uid); return s; });
 
     if (res.ok) {
+      const data = await res.json();
+      const newTx = data.transaction;
+
+      // Inserir imediatamente na lista sem esperar o reload
+      if (newTx) {
+        setTransactions((prev) => [newTx, ...prev]);
+      }
+
+      toast.success("Transação salva");
+
+      // Sincronizar em background (sem bloquear a UI)
+      loadTransactions();
+
       if (addNext) {
         const newUid = crypto.randomUUID();
         setInlineRows((prev) =>
@@ -216,6 +273,7 @@ export default function TransacoesPage() {
                   uid: newUid,
                   date: row.date,
                   description: "",
+                  alias: "",
                   amount: "",
                   category: "",
                   bankConnectionId: row.bankConnectionId,
@@ -228,7 +286,7 @@ export default function TransacoesPage() {
       } else {
         removeInlineRow(uid);
       }
-      load(true);
+
     }
   }
 
@@ -247,6 +305,21 @@ export default function TransacoesPage() {
       e.preventDefault();
       saveInlineRow(uid, true);
     }
+  }
+
+  // ── Split popover quick-save ──────────────────────────────────
+
+  async function saveSplitPopover(txId: string, pct: number, originalPct: number) {
+    if (pct === originalPct) return;
+    setSavingSplitTxId(txId);
+    await fetch(`/api/transactions/${txId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pctUser1: pct }),
+    });
+    await loadTransactions();
+    setSavingSplitTxId(null);
+    toast.success("Divisão salva");
   }
 
   // ── Edit dialog ──────────────────────────────────────────────
@@ -358,8 +431,10 @@ export default function TransacoesPage() {
   // ── Derived values ───────────────────────────────────────────
 
   const filtered = transactions.filter((tx) => {
-    if (hidePartnerPersonal && currentUserId && tx.owner.id !== currentUserId && !tx.isShared) {
-      return false;
+    if (hidePartnerPersonal && currentUserId && tx.owner.id !== currentUserId) {
+      // Só oculta se o usuário logado tem 0% de participação
+      const myAmount = isCurrentUserUser1 ? Number(tx.split?.amountUser1 ?? 0) : Number(tx.split?.amountUser2 ?? 0);
+      if (myAmount === 0) return false;
     }
     const search = filter.toLowerCase();
     return (
@@ -367,6 +442,29 @@ export default function TransacoesPage() {
       (tx.customName ?? "").toLowerCase().includes(search) ||
       (tx.category ?? "").toLowerCase().includes(search)
     );
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (sortCol === "date") cmp = new Date(a.date).getTime() - new Date(b.date).getTime();
+    else if (sortCol === "name") cmp = (a.customName ?? a.description).localeCompare(b.customName ?? b.description);
+    else if (sortCol === "category") cmp = (a.category ?? "").localeCompare(b.category ?? "");
+    else if (sortCol === "account") cmp = a.bankConnection.bankName.localeCompare(b.bankConnection.bankName);
+    else if (sortCol === "total") cmp = Number(a.amount) - Number(b.amount);
+    else if (sortCol === "my") {
+      const aAmt = isCurrentUserUser1 ? Number(a.split?.amountUser1 ?? 0) : Number(a.split?.amountUser2 ?? 0);
+      const bAmt = isCurrentUserUser1 ? Number(b.split?.amountUser1 ?? 0) : Number(b.split?.amountUser2 ?? 0);
+      cmp = aAmt - bAmt;
+    } else if (sortCol === "partner") {
+      const aAmt = isCurrentUserUser1 ? Number(a.split?.amountUser2 ?? 0) : Number(a.split?.amountUser1 ?? 0);
+      const bAmt = isCurrentUserUser1 ? Number(b.split?.amountUser2 ?? 0) : Number(b.split?.amountUser1 ?? 0);
+      cmp = aAmt - bAmt;
+    } else if (sortCol === "pct") {
+      const aPct = isCurrentUserUser1 ? Number(a.split?.pctUser1 ?? 0) : Number(a.split?.pctUser2 ?? 0);
+      const bPct = isCurrentUserUser1 ? Number(b.split?.pctUser1 ?? 0) : Number(b.split?.pctUser2 ?? 0);
+      cmp = aPct - bPct;
+    }
+    return sortDir === "asc" ? cmp : -cmp;
   });
 
   const pendingCount = filtered.filter((tx) => tx.pendingReview).length;
@@ -401,10 +499,6 @@ export default function TransacoesPage() {
             <Upload className="size-4 mr-1" />
             Importar CSV
           </Button>
-          <Button size="sm" onClick={addInlineRow}>
-            <Plus className="size-4 mr-1" />
-            Adicionar
-          </Button>
         </div>
       </div>
 
@@ -415,11 +509,11 @@ export default function TransacoesPage() {
           {loading ? <Skeleton className="h-6 w-24 mt-1" /> : <p className="font-semibold text-base">{formatBRL(totalShared)}</p>}
         </Card>
         <Card className="p-3">
-          <p className="text-muted-foreground text-xs">Minha parte</p>
+          <p className="text-muted-foreground text-xs">{myNickname ?? "Minha parte"}</p>
           {loading ? <Skeleton className="h-6 w-20 mt-1" /> : <p className="font-semibold text-base">{formatBRL(myShare)}</p>}
         </Card>
         <Card className="p-3">
-          <p className="text-muted-foreground text-xs">Parte da parceira</p>
+          <p className="text-muted-foreground text-xs">{partnerNickname ?? "Parceiro(a)"}</p>
           {loading ? <Skeleton className="h-6 w-20 mt-1" /> : <p className="font-semibold text-base">{formatBRL(partnerShare)}</p>}
         </Card>
         <Card className="p-3">
@@ -454,6 +548,10 @@ export default function TransacoesPage() {
           {hidePartnerPersonal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
           {hidePartnerPersonal ? "Pessoais ocultos" : "Ver todos"}
         </Button>
+        <Button size="sm" onClick={addInlineRow} className="shrink-0">
+          <Plus className="size-4 mr-1" />
+          Adicionar
+        </Button>
       </div>
 
       {/* Table */}
@@ -461,14 +559,41 @@ export default function TransacoesPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Data</TableHead>
-                <TableHead>Nome</TableHead>
-                <TableHead>Categoria</TableHead>
-                <TableHead>Conta</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead className="text-right">Eu</TableHead>
-                <TableHead className="text-right">Parceira</TableHead>
-                <TableHead className="text-right">%</TableHead>
+                {(["date", "name", "category", "account", "total", "my", "partner"] as const).map((col, i) => {
+                  const labels: Record<string, string> = {
+                    date: "Data", name: "Nome", category: "Categoria", account: "Conta",
+                    total: "Total", my: myNickname ?? "Eu", partner: partnerNickname ?? "Parceiro(a)",
+                  };
+                  const isRight = ["total", "my", "partner"].includes(col);
+                  const active = sortCol === col;
+                  const Icon = active ? (sortDir === "asc" ? ChevronUp : ChevronDown) : ChevronsUpDown;
+                  return (
+                    <TableHead key={col} className={isRight ? "text-right" : ""}>
+                      <button
+                        onClick={() => handleSort(col)}
+                        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${active ? "text-foreground font-semibold" : "text-muted-foreground"}`}
+                      >
+                        {labels[col]}
+                        <Icon className="size-3 shrink-0" />
+                      </button>
+                    </TableHead>
+                  );
+                })}
+                <TableHead className="text-right">
+                  {(() => {
+                    const active = sortCol === "pct";
+                    const Icon = active ? (sortDir === "asc" ? ChevronUp : ChevronDown) : ChevronsUpDown;
+                    return (
+                      <button
+                        onClick={() => handleSort("pct")}
+                        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${active ? "text-foreground font-semibold" : "text-muted-foreground"}`}
+                      >
+                        %
+                        <Icon className="size-3 shrink-0" />
+                      </button>
+                    );
+                  })()}
+                </TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -505,17 +630,28 @@ export default function TransacoesPage() {
                         disabled={isSaving}
                       />
                     </TableCell>
-                    {/* Descrição */}
-                    <TableCell className="py-1.5 max-w-[220px]">
-                      <input
-                        type="text"
-                        className="h-7 w-full rounded border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                        placeholder="Descrição..."
-                        value={row.description}
-                        onChange={(e) => updateInlineRow(row.uid, "description", e.target.value)}
-                        onKeyDown={(e) => handleInlineKeyDown(e, row.uid, false)}
-                        disabled={isSaving}
-                      />
+                    {/* Descrição + Apelido */}
+                    <TableCell className="py-2 max-w-[220px]">
+                      <div className="flex flex-col gap-1">
+                        <input
+                          type="text"
+                          className="h-7 w-full rounded border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                          placeholder="Descrição..."
+                          value={row.description}
+                          onChange={(e) => updateInlineRow(row.uid, "description", e.target.value)}
+                          onKeyDown={(e) => handleInlineKeyDown(e, row.uid, false)}
+                          disabled={isSaving}
+                        />
+                        <input
+                          type="text"
+                          className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                          placeholder="Apelido (opcional)..."
+                          value={row.alias}
+                          onChange={(e) => updateInlineRow(row.uid, "alias", e.target.value)}
+                          onKeyDown={(e) => handleInlineKeyDown(e, row.uid, false)}
+                          disabled={isSaving}
+                        />
+                      </div>
                     </TableCell>
                     {/* Categoria */}
                     <TableCell className="py-1.5 min-w-[160px]">
@@ -544,7 +680,7 @@ export default function TransacoesPage() {
                         disabled={isSaving}
                       >
                         <option value="">Conta...</option>
-                        {bankConnections.map((b) => (
+                        {bankConnections.filter((b) => b.user.id === currentUserId || b.accountType === "SHARED").map((b) => (
                           <option key={b.id} value={b.id}>
                             {b.bankName}
                           </option>
@@ -554,13 +690,18 @@ export default function TransacoesPage() {
                     {/* Valor */}
                     <TableCell className="py-1.5 text-right">
                       <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        className="h-7 w-24 rounded border border-input bg-background px-2 text-xs text-right focus:outline-none focus:ring-1 focus:ring-ring"
-                        placeholder="0,00"
-                        value={row.amount}
-                        onChange={(e) => updateInlineRow(row.uid, "amount", e.target.value)}
+                        type="text"
+                        inputMode="numeric"
+                        className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-right focus:outline-none focus:ring-1 focus:ring-ring"
+                        placeholder="R$ 0,00"
+                        value={row.amount
+                          ? `R$ ${Number(row.amount).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : ""}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, "");
+                          const numeric = digits ? (Number(digits) / 100).toString() : "";
+                          updateInlineRow(row.uid, "amount", numeric);
+                        }}
                         onKeyDown={(e) => handleInlineKeyDown(e, row.uid, true)}
                         disabled={isSaving}
                       />
@@ -606,7 +747,7 @@ export default function TransacoesPage() {
                   </TableCell>
                 </TableRow>
               ) : !loading && (
-                filtered.map((tx) => (
+                sorted.map((tx) => (
                   <TableRow key={tx.id} className={tx.pendingReview ? "bg-yellow-50 hover:bg-yellow-100" : ""}>
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                       {format(new Date(tx.date), "dd/MM")}
@@ -639,33 +780,101 @@ export default function TransacoesPage() {
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                       <div className="flex items-center gap-1">
-                        {tx.bankConnection.isCreditCard && <CreditCard className="size-3 shrink-0" />}
+                        {tx.bankConnection.isCreditCard
+                          ? tx.bankConnection.accountType === "SHARED"
+                            ? <Users className="size-3 shrink-0" />
+                            : <CreditCard className="size-3 shrink-0" />
+                          : tx.bankConnection.accountType === "SHARED"
+                            ? <Users className="size-3 shrink-0" />
+                            : <Landmark className="size-3 shrink-0" />
+                        }
                         <span className="truncate max-w-[100px]">{tx.bankConnection.bankName}</span>
                       </div>
-                      {tx.bankConnection.accountType === "SHARED" && (
-                        <Badge variant="secondary" className="text-xs mt-0.5">Compartilhada</Badge>
-                      )}
                     </TableCell>
                     <TableCell className="text-right font-medium text-sm">
                       {formatBRL(Number(tx.amount))}
                     </TableCell>
                     <TableCell className="text-right text-sm">
-                      {tx.isShared && tx.split
+                      {tx.split
                         ? formatBRL(Number(isCurrentUserUser1 ? tx.split.amountUser1 : tx.split.amountUser2))
-                        : <span className="text-muted-foreground text-xs">pessoal</span>}
+                        : formatBRL(Number(tx.amount))}
                     </TableCell>
                     <TableCell className="text-right text-sm text-muted-foreground">
-                      {tx.isShared && tx.split
+                      {tx.split
                         ? formatBRL(Number(isCurrentUserUser1 ? tx.split.amountUser2 : tx.split.amountUser1))
-                        : <span className="text-xs">—</span>}
+                        : formatBRL(0)}
                     </TableCell>
-                    <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">
-                      {tx.split ? (
-                        <span className={tx.split.isManualOverride ? "text-orange-500" : ""}>
-                          {Number(tx.split.pctUser1)}/{Number(tx.split.pctUser2)}
-                          {tx.split.isManualOverride && " ✎"}
-                        </span>
-                      ) : "—"}
+                    <TableCell className="text-right text-xs whitespace-nowrap">
+                      {tx.split ? (() => {
+                        const myPct = isCurrentUserUser1 ? Number(tx.split.pctUser1) : Number(tx.split.pctUser2);
+                        const isOpen = splitPopover?.txId === tx.id;
+                        const displayPct = isOpen ? splitPopover!.pct : myPct;
+                        const hasRule = !tx.split.isManualOverride && !!tx.split.appliedRule;
+                        const hasOverride = tx.split.isManualOverride;
+                        const isOwner = tx.owner.id === currentUserId;
+                        const colorClass = hasOverride ? "text-orange-500" : hasRule ? "text-blue-500" : "text-muted-foreground";
+
+                        if (!isOwner) return (
+                          <span className={`font-medium tabular-nums ${colorClass}`}>
+                            {Number(tx.split.pctUser1)}/{Number(tx.split.pctUser2)}
+                          </span>
+                        );
+
+                        return (
+                          <Popover
+                            open={isOpen}
+                            onOpenChange={(open) => {
+                              if (open) {
+                                setSplitPopover({ txId: tx.id, pct: myPct, originalPct: myPct });
+                              } else {
+                                if (splitPopover) saveSplitPopover(splitPopover.txId, splitPopover.pct, splitPopover.originalPct);
+                                setSplitPopover(null);
+                              }
+                            }}
+                          >
+                            <PopoverTrigger className={`cursor-pointer font-medium tabular-nums rounded px-1 py-0.5 hover:bg-muted transition-colors ${colorClass}`}>
+                              {savingSplitTxId === tx.id ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <svg className="animate-spin size-3" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                  </svg>
+                                </span>
+                              ) : (
+                                <>{Number(tx.split.pctUser1)}/{Number(tx.split.pctUser2)}</>
+                              )}
+                            </PopoverTrigger>
+                            <PopoverContent side="left" className="w-64 p-4 space-y-3">
+                              <div className="space-y-1">
+                                <p className="text-xs font-medium">Divisão rápida</p>
+                                {hasRule && !hasOverride && (
+                                  <p className="text-xs text-blue-500">Regra: {tx.split.appliedRule!.name}</p>
+                                )}
+                              </div>
+                              <div className="space-y-2">
+                                <div className="flex justify-between text-xs text-muted-foreground">
+                                  <span className="font-medium text-foreground">{myNickname ?? "Você"}: {isOpen ? splitPopover!.pct : myPct}%</span>
+                                  <span>{partnerNickname ?? "Parceiro(a)"}: {100 - (isOpen ? splitPopover!.pct : myPct)}%</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={100}
+                                  value={isOpen ? splitPopover!.pct : myPct}
+                                  onChange={(e) => setSplitPopover((prev) => prev ? { ...prev, pct: Number(e.target.value) } : null)}
+                                  className="w-full accent-primary"
+                                />
+                                <div className="flex justify-between text-xs text-muted-foreground">
+                                  <span>0%</span>
+                                  <span>50%</span>
+                                  <span>100%</span>
+                                </div>
+                              </div>
+                              <p className="text-xs text-muted-foreground">Clique fora para salvar</p>
+                            </PopoverContent>
+                          </Popover>
+                        );
+                      })() : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
                       {tx.pendingReview ? (
@@ -690,9 +899,21 @@ export default function TransacoesPage() {
                           </Button>
                         </div>
                       ) : (
-                        <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(tx)}>
-                          <Pencil className="size-3" />
-                        </Button>
+                        tx.owner.id === currentUserId ? (
+                          <div className="flex items-center gap-0.5">
+                            <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(tx)}>
+                              <Pencil className="size-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => deleteTransaction(tx)}
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          </div>
+                        ) : null
                       )}
                     </TableCell>
                   </TableRow>
@@ -755,8 +976,8 @@ export default function TransacoesPage() {
                   className="w-full"
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Eu: {formatBRL(Number(editing.amount) * Number(editPct) / 100)}</span>
-                  <span>Parceira: {formatBRL(Number(editing.amount) * (100 - Number(editPct)) / 100)}</span>
+                  <span>{myNickname ?? "Eu"}: {formatBRL(Number(editing.amount) * Number(editPct) / 100)}</span>
+                  <span>{partnerNickname ?? "Parceiro(a)"}: {formatBRL(Number(editing.amount) * (100 - Number(editPct)) / 100)}</span>
                 </div>
               </div>
             </div>

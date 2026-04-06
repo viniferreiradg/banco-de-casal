@@ -53,7 +53,7 @@ export async function GET() {
       : rule.userId === userId,
   }));
 
-  return NextResponse.json({ rules, isCurrentUserUser1: isUser1, user1Name, user2Name });
+  return NextResponse.json({ rules, isCurrentUserUser1: isUser1, user1Name, user2Name, currentUserId: userId });
 }
 
 // POST /api/rules

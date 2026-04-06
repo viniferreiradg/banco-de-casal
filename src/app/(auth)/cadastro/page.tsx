@@ -14,6 +14,7 @@ function CadastroForm() {
   const searchParams = useSearchParams();
   const inviteToken = searchParams.get("invite");
   const [name, setName] = useState("");
+  const [nickname, setNickname] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -27,7 +28,7 @@ function CadastroForm() {
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, nickname: nickname.trim() || undefined, email, password }),
     });
 
     if (!res.ok) {
@@ -66,10 +67,19 @@ function CadastroForm() {
             <Label htmlFor="name">Seu nome</Label>
             <Input
               id="name"
-              placeholder="Seu nome"
+              placeholder="Seu nome completo"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="nickname">Apelido <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+            <Input
+              id="nickname"
+              placeholder="Ex: Vini, Pati, Ju..."
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
             />
           </div>
           <div className="space-y-2">

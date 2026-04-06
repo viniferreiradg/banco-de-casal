@@ -33,6 +33,7 @@ interface Rule {
   priority: number;
   isActive: boolean;
   creatorIsUser1: boolean;
+  userId: string | null;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -50,6 +51,7 @@ export default function RegrasPage() {
   const [isCurrentUserUser1, setIsCurrentUserUser1] = useState(true);
   const [user1Name, setUser1Name] = useState<string | null>(null);
   const [user2Name, setUser2Name] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -70,6 +72,7 @@ export default function RegrasPage() {
     if (rulesData.isCurrentUserUser1 !== undefined) setIsCurrentUserUser1(rulesData.isCurrentUserUser1);
     if (rulesData.user1Name) setUser1Name(rulesData.user1Name);
     if (rulesData.user2Name) setUser2Name(rulesData.user2Name);
+    if (rulesData.currentUserId) setCurrentUserId(rulesData.currentUserId);
     setCategories(catData.categories ?? []);
     setLoading(false);
   }, []);
@@ -202,17 +205,19 @@ export default function RegrasPage() {
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <Button variant="ghost" size="icon" className="size-7" onClick={() => toggleActive(rule)}>
-                  {rule.isActive
-                    ? <ToggleRight className="size-4 text-green-600" />
-                    : <ToggleLeft className="size-4" />}
-                </Button>
-                <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(rule)}>
-                  <Pencil className="size-3" />
-                </Button>
-                <Button variant="ghost" size="icon" className="size-7 text-destructive" onClick={() => deleteRule(rule.id)}>
-                  <Trash2 className="size-3" />
-                </Button>
+                {rule.userId === currentUserId && (<>
+                  <Button variant="ghost" size="icon" className="size-7" onClick={() => toggleActive(rule)}>
+                    {rule.isActive
+                      ? <ToggleRight className="size-4 text-green-600" />
+                      : <ToggleLeft className="size-4" />}
+                  </Button>
+                  <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(rule)}>
+                    <Pencil className="size-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="size-7 text-destructive" onClick={() => deleteRule(rule.id)}>
+                    <Trash2 className="size-3" />
+                  </Button>
+                </>)}
               </div>
             </div>
           ))}

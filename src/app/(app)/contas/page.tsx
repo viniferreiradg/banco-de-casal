@@ -34,10 +34,12 @@ interface BankConnection {
   status: string;
   lastSyncAt: string | null;
   _count?: { transactions: number };
+  user: { id: string; name: string };
 }
 
 export default function ContasPage() {
   const [connections, setConnections] = useState<BankConnection[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [connectOpen, setConnectOpen] = useState(false);
   const [accountType, setAccountType] = useState<"PERSONAL" | "SHARED">("PERSONAL");
@@ -51,6 +53,7 @@ export default function ContasPage() {
     const res = await fetch("/api/bank-connections");
     const data = await res.json();
     setConnections(data.connections ?? []);
+    if (data.currentUserId) setCurrentUserId(data.currentUserId);
     setLoading(false);
   }, []);
 
@@ -188,7 +191,7 @@ export default function ContasPage() {
                     )}
                     <div>
                       <CardTitle className="text-sm">{conn.bankName}</CardTitle>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <Badge
                           className={`text-xs ${statusColors[conn.status] ?? ""}`}
                           variant="outline"
@@ -204,34 +207,42 @@ export default function ContasPage() {
                             Crédito
                           </Badge>
                         )}
+                        <Badge
+                          variant={conn.user.id === currentUserId ? "default" : "outline"}
+                          className="text-xs"
+                        >
+                          {conn.user.id === currentUserId ? "Você" : conn.user.name}
+                        </Badge>
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {conn.isManual ? (
+                  {conn.user.id === currentUserId && (
+                    <div className="flex items-center gap-1">
+                      {conn.isManual ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          title="Converter para automático"
+                          onClick={() => convertToAutomatic(conn.id)}
+                        >
+                          <ArrowRightLeft className="size-3" />
+                        </Button>
+                      ) : (
+                        <Button variant="ghost" size="icon" className="size-7" title="Sincronizar agora">
+                          <RefreshCw className="size-3" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="size-7"
-                        title="Converter para automático"
-                        onClick={() => convertToAutomatic(conn.id)}
+                        className="size-7 text-destructive"
+                        onClick={() => deleteConnection(conn.id)}
                       >
-                        <ArrowRightLeft className="size-3" />
+                        <Trash2 className="size-3" />
                       </Button>
-                    ) : (
-                      <Button variant="ghost" size="icon" className="size-7" title="Sincronizar agora">
-                        <RefreshCw className="size-3" />
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-destructive"
-                      onClick={() => deleteConnection(conn.id)}
-                    >
-                      <Trash2 className="size-3" />
-                    </Button>
-                  </div>
+                    </div>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="py-2 px-4 border-t">

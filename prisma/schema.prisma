@@ -11,6 +11,7 @@ model User {
   id        String   @id @default(cuid())
   email     String   @unique
   name      String
+  nickname  String?
   avatarUrl String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -126,6 +127,8 @@ model SplitRule {
   userId String?
   user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  appliedToSplits TransactionSplit[]
+
   @@map("split_rules")
 }
 
@@ -137,6 +140,7 @@ model TransactionSplit {
   amountUser2      Decimal  @db.Decimal(12, 2)
   isManualOverride Boolean  @default(false)
   appliedRuleId    String?
+  appliedRule      SplitRule? @relation(fields: [appliedRuleId], references: [id], onDelete: SetNull)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

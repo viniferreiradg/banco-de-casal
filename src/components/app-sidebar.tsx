@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 
 const navItems = [
@@ -34,9 +34,10 @@ const settingsItems = [
 interface AppSidebarProps {
   userName: string;
   userEmail: string;
+  avatarUrl?: string | null;
 }
 
-export function AppSidebar({ userName, userEmail }: AppSidebarProps) {
+export function AppSidebar({ userName, userEmail, avatarUrl }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -67,11 +68,20 @@ export function AppSidebar({ userName, userEmail }: AppSidebarProps) {
 
       <div className="p-3 border-t space-y-2">
         <div className="flex items-center gap-3 px-2 py-1">
-          <Avatar className="size-8">
-            <AvatarFallback className="text-xs">
-              {userName.slice(0, 2).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
+          <div className="relative shrink-0">
+            <Avatar className="size-8">
+              {avatarUrl && <AvatarImage src={avatarUrl} alt={userName} className="object-cover" />}
+              <AvatarFallback className="text-xs">
+                {(() => {
+                  const parts = userName.trim().split(/\s+/).filter(Boolean);
+                  return parts.length > 1
+                    ? (parts[0][0] + parts.at(-1)![0]).toUpperCase()
+                    : userName.slice(0, 2).toUpperCase();
+                })()}
+              </AvatarFallback>
+            </Avatar>
+            <span className="absolute bottom-0 right-0 size-2 rounded-full bg-green-500 ring-2 ring-background" />
+          </div>
           <div className="min-w-0">
             <p className="text-sm font-medium truncate">{userName}</p>
             <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
