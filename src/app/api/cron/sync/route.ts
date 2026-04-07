@@ -11,7 +11,10 @@ export async function GET() {
       user: {
         include: {
           couple: {
-            include: { splitRules: { where: { isActive: true } } },
+            include: {
+              splitRules: { where: { isActive: true } },
+              categoryRules: { where: { isActive: true } },
+            },
           },
         },
       },
@@ -36,6 +39,7 @@ export async function GET() {
                   ...r,
                   matchField: r.matchField as "CATEGORY" | "DESCRIPTION" | "ACCOUNT_TYPE",
                 })),
+                categoryRules: conn.user.couple.categoryRules,
               }
             : null,
         },

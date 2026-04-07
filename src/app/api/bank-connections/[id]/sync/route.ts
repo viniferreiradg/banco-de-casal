@@ -19,7 +19,10 @@ export async function POST(
       user: {
         include: {
           couple: {
-            include: { splitRules: { where: { isActive: true } } },
+            include: {
+              splitRules: { where: { isActive: true } },
+              categoryRules: { where: { isActive: true } },
+            },
           },
         },
       },
@@ -50,6 +53,7 @@ export async function POST(
               ...r,
               matchField: r.matchField as "CATEGORY" | "DESCRIPTION" | "ACCOUNT_TYPE",
             })),
+            categoryRules: conn.user.couple.categoryRules,
           }
         : null,
     },

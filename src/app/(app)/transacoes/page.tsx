@@ -434,6 +434,7 @@ export default function TransacoesPage() {
                   amount: "",
                   category: "",
                   bankConnectionId: row.bankConnectionId,
+                  pct: null,
                 }
               : r
           )
