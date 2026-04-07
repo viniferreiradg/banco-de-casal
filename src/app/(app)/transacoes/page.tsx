@@ -30,13 +30,50 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { ChevronLeft, ChevronRight, Pencil, Plus, Upload, CreditCard, Check, X, AlertTriangle, Trash2, Eye, EyeOff, ChevronUp, ChevronDown, ChevronsUpDown, Landmark, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, Plus, Upload, CreditCard, Check, X, AlertTriangle, Trash2, Eye, EyeOff, ChevronUp, ChevronDown, ChevronsUpDown, Landmark, Users, Percent } from "lucide-react";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/ui/category-combobox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 function Skeleton({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded bg-muted ${className ?? ""}`} />;
+}
+
+function SavingRow({ label = "Salvando" }: { label?: string }) {
+  return (
+    <TableCell colSpan={9} className="h-[62px] text-center">
+      <span className="text-sm text-muted-foreground inline-flex items-center gap-0.5">
+        {label}
+        <span className="animate-bounce inline-block" style={{ animationDelay: "0ms" }}>.</span>
+        <span className="animate-bounce inline-block" style={{ animationDelay: "150ms" }}>.</span>
+        <span className="animate-bounce inline-block" style={{ animationDelay: "300ms" }}>.</span>
+      </span>
+    </TableCell>
+  );
+}
+
+function ConfirmDeleteRow({ name, onConfirm, onCancel }: { name: string; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <TableCell colSpan={9} className="h-[62px]">
+      <div className="flex items-center justify-center gap-3">
+        <span className="text-sm text-muted-foreground">
+          Excluir <span className="font-medium text-foreground">{name}</span>?
+        </span>
+        <button
+          onClick={onConfirm}
+          className="h-7 px-3 rounded text-xs font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+        >
+          Sim, excluir
+        </button>
+        <button
+          onClick={onCancel}
+          className="h-7 px-3 rounded text-xs font-medium border border-input bg-background hover:bg-accent transition-colors"
+        >
+          Não
+        </button>
+      </div>
+    </TableCell>
+  );
 }
 
 interface Split {
@@ -70,6 +107,7 @@ interface Transaction {
 interface BankConnection {
   id: string;
   bankName: string;
+  nickname: string | null;
   accountType: string;
   isCreditCard: boolean;
   user: { id: string; name: string };
@@ -83,10 +121,60 @@ interface InlineRow {
   amount: string;
   category: string;
   bankConnectionId: string;
+  pct: number | null; // null = calculado automaticamente pelas regras
 }
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+// Pix description parser — extracts structured fields from Nubank debit descriptions
+interface PixInfo {
+  direction: "enviada" | "recebida";
+  name: string;
+  document?: string; // CPF/CNPJ (masked or not)
+  bank?: string;
+  agency?: string;
+  account?: string;
+}
+
+function parsePixDescription(desc: string): PixInfo | null {
+  const m = desc.match(
+    /^transfer[eê]ncia\s+(enviada|recebida)[^-]*?-\s*(.+?)\s*-\s*([•\d][^\-]+?)\s*-\s*(.+?)(?:\s+ag[eê]ncia:\s*(\S+)\s+conta:\s*(\S+))?\.?\s*$/i
+  );
+  if (!m) return null;
+  return {
+    direction: m[1].toLowerCase().startsWith("envia") ? "enviada" : "recebida",
+    name: m[2].trim(),
+    document: m[3]?.trim(),
+    bank: m[4]?.trim().replace(/\.$/, ""),
+    agency: m[5]?.trim(),
+    account: m[6]?.trim(),
+  };
+}
+
+function shortPixLabel(desc: string): string {
+  const pix = parsePixDescription(desc);
+  if (!pix) return desc;
+  return `Pix - ${pix.name}`;
+}
+
+function transactionTypeLabel(desc: string): string | null {
+  const d = desc.toLowerCase();
+  if (d.startsWith("transferência enviada pelo pix") || d.startsWith("transferencia enviada pelo pix")) return "Pix enviado";
+  if (d.startsWith("transferência recebida pelo pix") || d.startsWith("transferencia recebida pelo pix")) return "Pix recebido";
+  if (d.startsWith("pagamento de boleto")) return "Boleto";
+  return null;
+}
+
+function isInstallmentNote(notes: string | null | undefined): boolean {
+  return !!notes && /^Parcela\s+\d+\/\d+$/i.test(notes);
+}
+
+function isLastInstallment(notes: string | null | undefined): boolean {
+  if (!notes) return false;
+  const m = notes.match(/^Parcela\s+(\d+)\/(\d+)$/i);
+  return !!m && m[1] === m[2];
 }
 
 function monthLabel(month: string) {
@@ -132,7 +220,12 @@ export default function TransacoesPage() {
   const [inlineRows, setInlineRows] = useState<InlineRow[]>([]);
   const [savingRows, setSavingRows] = useState<Set<string>>(new Set());
   const [focusRowUid, setFocusRowUid] = useState<string | null>(null);
+  const [inlineSplitOpenUid, setInlineSplitOpenUid] = useState<string | null>(null);
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // Inline delete confirm
+  const [confirmDeleteTxId, setConfirmDeleteTxId] = useState<string | null>(null);
+  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
 
   // Edit dialog
   const [editing, setEditing] = useState<Transaction | null>(null);
@@ -141,6 +234,29 @@ export default function TransacoesPage() {
   const [editCategory, setEditCategory] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Quick-edit inline (click on name/category in the row)
+  const [quickEditTxId, setQuickEditTxId] = useState<string | null>(null);
+  const [quickEditForm, setQuickEditForm] = useState<{
+    date: string; description: string; customName: string;
+    category: string; bankConnectionId: string; amount: string; pct: number | null;
+  }>({ date: "", description: "", customName: "", category: "", bankConnectionId: "", amount: "", pct: null });
+  const [quickEditSplitOpen, setQuickEditSplitOpen] = useState(false);
+  const [savingQuickEdit, setSavingQuickEdit] = useState(false);
+  const quickEditRowRef = useRef<HTMLTableRowElement>(null);
+  const isSavingQuickEditRef = useRef(false);
+  const pendingQuickEditTxRef = useRef<Transaction | null>(null);
+  const saveQuickEditFnRef = useRef<((tx: Transaction) => Promise<void>) | null>(null);
+  const quickEditOriginalRef = useRef<typeof quickEditForm | null>(null);
+  const quickEditFormRef = useRef(quickEditForm);
+
+  // Category rule prompt (after saving edit with a new category)
+  const [catRulePrompt, setCatRulePrompt] = useState<{ description: string; category: string } | null>(null);
+  const [savingCatRule, setSavingCatRule] = useState(false);
+
+  // Split rule prompt (after changing percentage)
+  const [splitRulePrompt, setSplitRulePrompt] = useState<{ description: string; myPct: number } | null>(null);
+  const [savingSplitRule, setSavingSplitRule] = useState(false);
 
   // Split popover (inline quick-edit)
   const [splitPopover, setSplitPopover] = useState<{ txId: string; pct: number; originalPct: number } | null>(null);
@@ -151,8 +267,46 @@ export default function TransacoesPage() {
   const [importBankId, setImportBankId] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ imported: number; skipped: number } | null>(null);
+  const [duplicateCheck, setDuplicateCheck] = useState<{ total: number; duplicates: number } | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Delete all (test only)
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  // Import progress
+  const [importProgress, setImportProgress] = useState<{ processed: number; total: number } | null>(null);
+
+  // Mantém ref da função de save sempre atualizada (evita closure stale)
+  useEffect(() => { saveQuickEditFnRef.current = saveQuickEdit; });
+  // Mantém ref do form sempre atualizada (evita closure stale no mousedown)
+  useEffect(() => { quickEditFormRef.current = quickEditForm; });
+
+  // Clique fora do quick-edit → salva; se for em outra transação, abre depois
+  useEffect(() => {
+    if (!quickEditTxId) return;
+    function handleMouseDown(e: MouseEvent) {
+      // Ignore clicks inside any portal/floating content (e.g. category dropdown, percent popover)
+      const insideFloating = !!(e.target as Element).closest?.('[data-slot="popover-content"]');
+      if (quickEditRowRef.current && !quickEditRowRef.current.contains(e.target as Node) && !insideFloating) {
+        const tx = transactions.find((t) => t.id === quickEditTxId);
+        const orig = quickEditOriginalRef.current;
+        const form = quickEditFormRef.current;
+        // Verifica se algo foi alterado comparando com os valores originais
+        const changed = !orig || Object.keys(orig).some(
+          (k) => (orig as Record<string, unknown>)[k] !== (form as Record<string, unknown>)?.[k]
+        );
+        if (tx && saveQuickEditFnRef.current && changed) {
+          isSavingQuickEditRef.current = true;
+          saveQuickEditFnRef.current(tx);
+        } else {
+          setQuickEditTxId(null);
+        }
+      }
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [quickEditTxId, transactions]);
 
   const loadTransactions = useCallback(async () => {
     try {
@@ -184,10 +338,11 @@ export default function TransacoesPage() {
       if (txData.partnerNickname) setPartnerNickname(txData.partnerNickname);
       setBankConnections(bankData.connections ?? []);
       setCategories(catData.categories ?? []);
+      setLoading(false);
     } catch (e) {
       console.error("Erro ao carregar transações:", e);
+      setLoading(false);
     }
-    setLoading(false);
   }, [month]);
 
   useEffect(() => { load(); }, [load]);
@@ -214,6 +369,7 @@ export default function TransacoesPage() {
         amount: "",
         category: "",
         bankConnectionId: bankConnections.find((b) => b.user.id === currentUserId || b.accountType === "SHARED")?.id ?? "",
+        pct: null,
       },
     ]);
     setFocusRowUid(uid);
@@ -245,6 +401,7 @@ export default function TransacoesPage() {
         amount: Number(row.amount),
         category: row.category.trim() || null,
         bankConnectionId: row.bankConnectionId,
+        ...(row.pct !== null ? { pctUser1: row.pct } : {}),
       }),
     });
 
@@ -309,7 +466,7 @@ export default function TransacoesPage() {
 
   // ── Split popover quick-save ──────────────────────────────────
 
-  async function saveSplitPopover(txId: string, pct: number, originalPct: number) {
+  async function saveSplitPopover(txId: string, pct: number, originalPct: number, description: string) {
     if (pct === originalPct) return;
     setSavingSplitTxId(txId);
     await fetch(`/api/transactions/${txId}`, {
@@ -320,6 +477,7 @@ export default function TransacoesPage() {
     await loadTransactions();
     setSavingSplitTxId(null);
     toast.success("Divisão salva");
+    setSplitRulePrompt({ description, myPct: pct });
   }
 
   // ── Edit dialog ──────────────────────────────────────────────
@@ -338,6 +496,11 @@ export default function TransacoesPage() {
 
   async function deleteTransaction(tx: Transaction) {
     setEditing(null);
+    setConfirmDeleteTxId(null);
+    setDeletingTxId(tx.id);
+    // Small delay so the "excluindo..." row is visible before the row disappears
+    await new Promise((r) => setTimeout(r, 600));
+    setDeletingTxId(null);
     // Optimistic: remove from UI immediately
     setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
 
@@ -379,19 +542,148 @@ export default function TransacoesPage() {
   async function saveEdit() {
     if (!editing) return;
     setSaving(true);
+    const previousCategory = editing.category ?? "";
+    const previousMyPct = editing.split
+      ? (isCurrentUserUser1 ? Number(editing.split.pctUser1) : Number(editing.split.pctUser2))
+      : 50;
+    const newMyPct = Number(editPct);
     await fetch(`/api/transactions/${editing.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        pctUser1: Number(editPct),
+        pctUser1: newMyPct,
         customName: editCustomName || null,
         category: editCategory || null,
         notes: editNotes || null,
       }),
     });
     setSaving(false);
+    const description = editing.description;
+    const newCategory = editCategory.trim();
     setEditing(null);
     load(true);
+    // Se mudou a categoria, pergunta se quer criar regra de categoria
+    if (newCategory && newCategory !== previousCategory) {
+      setCatRulePrompt({ description, category: newCategory });
+    // Se mudou só a porcentagem, pergunta se quer criar regra de divisão
+    } else if (newMyPct !== previousMyPct) {
+      setSplitRulePrompt({ description, myPct: newMyPct });
+    }
+  }
+
+  function openQuickEdit(tx: Transaction) {
+    // Se ainda está salvando outra transação, guarda como pendente e aguarda
+    if (isSavingQuickEditRef.current) {
+      pendingQuickEditTxRef.current = tx;
+      return;
+    }
+    const myPct = tx.split
+      ? (isCurrentUserUser1 ? Number(tx.split.pctUser1) : Number(tx.split.pctUser2))
+      : null;
+    setQuickEditForm({
+      date: format(new Date(tx.date), "yyyy-MM-dd"),
+      description: tx.description,
+      customName: tx.customName ?? "",
+      category: tx.category ?? "",
+      bankConnectionId: tx.bankConnectionId,
+      amount: String(Number(tx.amount)),
+      pct: tx.split?.isManualOverride ? myPct : null,
+    });
+    quickEditOriginalRef.current = {
+      date: format(new Date(tx.date), "yyyy-MM-dd"),
+      description: tx.description,
+      customName: tx.customName ?? "",
+      category: tx.category ?? "",
+      bankConnectionId: tx.bankConnectionId,
+      amount: String(Number(tx.amount)),
+      pct: tx.split?.isManualOverride ? myPct : null,
+    };
+    setQuickEditTxId(tx.id);
+    setQuickEditSplitOpen(false);
+  }
+
+  async function saveQuickEdit(tx: Transaction) {
+    if (savingQuickEdit) return;
+    setSavingQuickEdit(true);
+    const previousCategory = tx.category ?? "";
+    const previousMyPct = tx.split
+      ? (isCurrentUserUser1 ? Number(tx.split.pctUser1) : Number(tx.split.pctUser2))
+      : 50;
+    const body: Record<string, unknown> = {
+      date: quickEditForm.date,
+      description: quickEditForm.description.trim() || tx.description,
+      customName: quickEditForm.customName || null,
+      category: quickEditForm.category || null,
+      bankConnectionId: quickEditForm.bankConnectionId || tx.bankConnectionId,
+      amount: Number(quickEditForm.amount) || Number(tx.amount),
+    };
+    if (quickEditForm.pct !== null) body.pctUser1 = quickEditForm.pct;
+    await fetch(`/api/transactions/${tx.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    isSavingQuickEditRef.current = false;
+    setSavingQuickEdit(false);
+    setQuickEditTxId(null);
+    toast.success("Transação salva");
+    load(true);
+    // Abre a transação que o usuário tentou clicar enquanto salvava
+    const pending = pendingQuickEditTxRef.current;
+    pendingQuickEditTxRef.current = null;
+    if (pending) openQuickEdit(pending);
+    const newCategory = quickEditForm.category.trim();
+    const newMyPct = quickEditForm.pct ?? previousMyPct;
+    if (newCategory && newCategory !== previousCategory) {
+      setCatRulePrompt({ description: tx.description, category: newCategory });
+    } else if (quickEditForm.pct !== null && newMyPct !== previousMyPct) {
+      setSplitRulePrompt({ description: tx.description, myPct: newMyPct });
+    }
+  }
+
+  async function createSplitRuleFromPrompt() {
+    if (!splitRulePrompt) return;
+    setSavingSplitRule(true);
+    await fetch("/api/rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: splitRulePrompt.description,
+        matchField: "DESCRIPTION",
+        matchValue: splitRulePrompt.description,
+        pctUser1: splitRulePrompt.myPct,
+        priority: 0,
+      }),
+    });
+    setSavingSplitRule(false);
+    setSplitRulePrompt(null);
+  }
+
+  async function createCatRuleFromPrompt(applyToExisting = false) {
+    if (!catRulePrompt) return;
+    setSavingCatRule(true);
+    await fetch("/api/category-rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: catRulePrompt.description,
+        matchValue: catRulePrompt.description,
+        category: catRulePrompt.category,
+      }),
+    });
+    if (applyToExisting) {
+      await fetch("/api/transactions/bulk-category", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchValue: catRulePrompt.description,
+          category: catRulePrompt.category,
+        }),
+      });
+      load(true);
+    }
+    setSavingCatRule(false);
+    setCatRulePrompt(null);
   }
 
   // ── Pending review ───────────────────────────────────────────
@@ -412,23 +704,147 @@ export default function TransacoesPage() {
     load(true);
   }
 
+  // ── Delete all (test only) ───────────────────────────────────
+
+  async function deleteAll() {
+    if (!confirm("Apagar TODAS as transações? Essa ação não pode ser desfeita.")) return;
+    setDeletingAll(true);
+    try {
+      await fetch("/api/transactions/delete-all", { method: "DELETE" });
+      load(true);
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
   // ── CSV import ───────────────────────────────────────────────
+
+  function autoDetectBank(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const firstLine = (e.target?.result as string ?? "").split(/\r?\n/)[0].toLowerCase();
+      const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const headers = norm(firstLine);
+
+      const myConnections = bankConnections.filter(
+        (b) => b.user.id === currentUserId || b.accountType === "SHARED"
+      );
+
+      let match: BankConnection | undefined;
+
+      if (headers.includes("title") && headers.includes("amount")) {
+        // Nubank credit: date,title,amount
+        match = myConnections.find(
+          (b) => b.bankName.toLowerCase().includes("nubank") && b.isCreditCard
+        );
+      } else if (headers.includes("identificador")) {
+        // Nubank debit: Data,Valor,Identificador,Descrição
+        match = myConnections.find(
+          (b) => b.bankName.toLowerCase().includes("nubank") && !b.isCreditCard
+        );
+      } else if (headers.includes("detalhe") || headers.includes("lancamento")) {
+        // Banco do Brasil
+        match = myConnections.find((b) => b.bankName.toLowerCase().includes("brasil"));
+      }
+
+      if (match) setImportBankId(match.id);
+    };
+    reader.readAsText(file);
+  }
 
   async function runImport() {
     if (!importFile || !importBankId) return;
     setImporting(true);
-    setImportResult(null);
-    const fd = new FormData();
-    fd.append("file", importFile);
-    fd.append("bankConnectionId", importBankId);
-    const res = await fetch("/api/transactions/import", { method: "POST", body: fd });
-    const data = await res.json();
-    setImporting(false);
-    setImportResult(data);
-    if (res.ok) load(true);
+    setAnalyzing(true);
+    setImportProgress(null);
+    setDuplicateCheck(null);
+    try {
+      // Phase 1: check for duplicates
+      const checkFd = new FormData();
+      checkFd.append("file", importFile);
+      checkFd.append("bankConnectionId", importBankId);
+      checkFd.append("checkOnly", "true");
+      const checkRes = await fetch("/api/transactions/import", { method: "POST", body: checkFd });
+      setAnalyzing(false);
+      if (!checkRes.ok) {
+        const data = await checkRes.json().catch(() => ({}));
+        toast.error(data.error ?? "Erro ao verificar arquivo.");
+        return;
+      }
+      const check = await checkRes.json() as { total: number; duplicates: number };
+      if (check.duplicates > 0) {
+        // Show modal and wait for user choice
+        setDuplicateCheck(check);
+        setImporting(false);
+        return;
+      }
+      // No duplicates: proceed directly
+      await doImport(true);
+    } catch {
+      setAnalyzing(false);
+      toast.error("Erro ao importar. Tente novamente.");
+    } finally {
+      setImporting(false);
+      setImportProgress(null);
+    }
+  }
+
+  async function doImport(skipDuplicates: boolean) {
+    if (!importFile || !importBankId) return;
+    setDuplicateCheck(null);
+    setImporting(true);
+    setImportProgress(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", importFile);
+      fd.append("bankConnectionId", importBankId);
+      fd.append("skipDuplicates", skipDuplicates ? "true" : "false");
+      const res = await fetch("/api/transactions/import", { method: "POST", body: fd });
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error ?? "Erro ao importar.");
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const msg = JSON.parse(line);
+          if (msg.type === "total") {
+            setImportProgress({ processed: 0, total: msg.total });
+          } else if (msg.type === "progress") {
+            setImportProgress({ processed: msg.processed, total: msg.total });
+          } else if (msg.type === "done") {
+            setImportOpen(false);
+            setImportFile(null);
+            setImportBankId("");
+            const skippedMsg = msg.skipped > 0 ? ` · ${msg.skipped} ignoradas` : "";
+            toast.success(`${msg.imported} transações importadas${skippedMsg}`);
+            load(true);
+          }
+        }
+      }
+    } catch {
+      toast.error("Erro ao importar. Tente novamente.");
+    } finally {
+      setImporting(false);
+      setImportProgress(null);
+    }
   }
 
   // ── Derived values ───────────────────────────────────────────
+
+  const categoryIconMap = Object.fromEntries(
+    categories.map((c) => [c.name.toLowerCase(), c.icon])
+  );
+  const getCategoryIcon = (name: string) => categoryIconMap[name.toLowerCase()] ?? null;
 
   const filtered = transactions.filter((tx) => {
     if (hidePartnerPersonal && currentUserId && tx.owner.id !== currentUserId) {
@@ -469,9 +885,22 @@ export default function TransacoesPage() {
 
   const pendingCount = filtered.filter((tx) => tx.pendingReview).length;
   const confirmed = filtered.filter((tx) => !tx.pendingReview);
-  const totalShared = confirmed.filter((tx) => tx.isShared).reduce((s, tx) => s + Number(tx.amount), 0);
-  const myShare = confirmed.filter((tx) => tx.isShared && tx.split).reduce((s, tx) => s + Number(isCurrentUserUser1 ? tx.split!.amountUser1 : tx.split!.amountUser2), 0);
-  const partnerShare = confirmed.filter((tx) => tx.isShared && tx.split).reduce((s, tx) => s + Number(isCurrentUserUser1 ? tx.split!.amountUser2 : tx.split!.amountUser1), 0);
+  const totalSpent = confirmed.reduce((s, tx) => s + Number(tx.amount), 0);
+
+  // "gastou" = pagou do próprio bolso (transações que são suas)
+  // "deve"   = saldo líquido: o que deve ao outro menos o que o outro deve a ele
+  const mySpent   = confirmed.reduce((s, tx) => tx.owner.id === currentUserId ? s + Number(tx.amount) : s, 0);
+  const partnerSpent = confirmed.reduce((s, tx) => tx.owner.id !== currentUserId ? s + Number(tx.amount) : s, 0);
+
+  // Bruto: parte de cada um nas transações DO OUTRO
+  const myGrossOwed = confirmed.filter((tx) => tx.owner.id !== currentUserId && tx.split)
+    .reduce((s, tx) => s + Number(isCurrentUserUser1 ? tx.split!.amountUser1 : tx.split!.amountUser2), 0);
+  const partnerGrossOwed = confirmed.filter((tx) => tx.owner.id === currentUserId && tx.split)
+    .reduce((s, tx) => s + Number(isCurrentUserUser1 ? tx.split!.amountUser2 : tx.split!.amountUser1), 0);
+
+  // Líquido: quem deve a quem depois de neteado
+  const myOwed      = Math.max(0, myGrossOwed - partnerGrossOwed);
+  const partnerOwed = Math.max(0, partnerGrossOwed - myGrossOwed);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-4">
@@ -499,22 +928,39 @@ export default function TransacoesPage() {
             <Upload className="size-4 mr-1" />
             Importar CSV
           </Button>
+          <Button size="sm" variant="destructive" onClick={deleteAll} disabled={deletingAll}>
+            {deletingAll ? "Apagando..." : "Apagar tudo"}
+          </Button>
         </div>
       </div>
 
       {/* Totals */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
         <Card className="p-3">
-          <p className="text-muted-foreground text-xs">Total compartilhado</p>
-          {loading ? <Skeleton className="h-6 w-24 mt-1" /> : <p className="font-semibold text-base">{formatBRL(totalShared)}</p>}
+          <p className="text-muted-foreground text-xs">Total gasto</p>
+          {loading ? <Skeleton className="h-6 w-24 mt-1" /> : <p className="font-semibold text-base">{formatBRL(totalSpent)}</p>}
         </Card>
         <Card className="p-3">
-          <p className="text-muted-foreground text-xs">{myNickname ?? "Minha parte"}</p>
-          {loading ? <Skeleton className="h-6 w-20 mt-1" /> : <p className="font-semibold text-base">{formatBRL(myShare)}</p>}
+          <p className="font-medium text-xs mb-1">{myNickname ?? "Eu"}</p>
+          {loading ? (
+            <div className="space-y-1"><Skeleton className="h-4 w-24" /><Skeleton className="h-4 w-20" /></div>
+          ) : (
+            <div className="space-y-0.5">
+              <p className="text-xs text-muted-foreground">gastou <span className="text-foreground font-medium">{formatBRL(mySpent)}</span></p>
+              <p className="text-xs text-muted-foreground">deve <span className={`font-medium ${myOwed > 0 ? "text-orange-500" : "text-foreground"}`}>{formatBRL(myOwed)}</span></p>
+            </div>
+          )}
         </Card>
         <Card className="p-3">
-          <p className="text-muted-foreground text-xs">{partnerNickname ?? "Parceiro(a)"}</p>
-          {loading ? <Skeleton className="h-6 w-20 mt-1" /> : <p className="font-semibold text-base">{formatBRL(partnerShare)}</p>}
+          <p className="font-medium text-xs mb-1">{partnerNickname ?? "Parceiro(a)"}</p>
+          {loading ? (
+            <div className="space-y-1"><Skeleton className="h-4 w-24" /><Skeleton className="h-4 w-20" /></div>
+          ) : (
+            <div className="space-y-0.5">
+              <p className="text-xs text-muted-foreground">gastou <span className="text-foreground font-medium">{formatBRL(partnerSpent)}</span></p>
+              <p className="text-xs text-muted-foreground">deve <span className={`font-medium ${partnerOwed > 0 ? "text-orange-500" : "text-foreground"}`}>{formatBRL(partnerOwed)}</span></p>
+            </div>
+          )}
         </Card>
         <Card className="p-3">
           <p className="text-muted-foreground text-xs">Lançamentos</p>
@@ -565,10 +1011,16 @@ export default function TransacoesPage() {
                     total: "Total", my: myNickname ?? "Eu", partner: partnerNickname ?? "Parceiro(a)",
                   };
                   const isRight = ["total", "my", "partner"].includes(col);
+                  const widths: Record<string, string> = {
+                    date: "w-[110px] min-w-[110px]",
+                    total: "w-[90px] min-w-[90px]",
+                    my: "w-[80px] min-w-[80px]",
+                    partner: "w-[80px] min-w-[80px]",
+                  };
                   const active = sortCol === col;
                   const Icon = active ? (sortDir === "asc" ? ChevronUp : ChevronDown) : ChevronsUpDown;
                   return (
-                    <TableHead key={col} className={isRight ? "text-right" : ""}>
+                    <TableHead key={col} className={`${isRight ? "text-right" : ""} ${widths[col] ?? ""}`}>
                       <button
                         onClick={() => handleSort(col)}
                         className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${active ? "text-foreground font-semibold" : "text-muted-foreground"}`}
@@ -618,6 +1070,7 @@ export default function TransacoesPage() {
                 const canSave = row.description.trim() && row.amount && row.bankConnectionId;
                 return (
                   <TableRow key={row.uid} className="bg-blue-50/40 hover:bg-blue-50/60">
+                  {isSaving ? <SavingRow /> : (<>
                     {/* Data */}
                     <TableCell className="py-1.5">
                       <input
@@ -682,7 +1135,7 @@ export default function TransacoesPage() {
                         <option value="">Conta...</option>
                         {bankConnections.filter((b) => b.user.id === currentUserId || b.accountType === "SHARED").map((b) => (
                           <option key={b.id} value={b.id}>
-                            {b.bankName}
+                            {b.nickname ?? b.bankName}
                           </option>
                         ))}
                       </select>
@@ -692,7 +1145,7 @@ export default function TransacoesPage() {
                       <input
                         type="text"
                         inputMode="numeric"
-                        className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-right focus:outline-none focus:ring-1 focus:ring-ring"
+                        className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-right focus:outline-none focus:ring-1 focus:ring-ring"
                         placeholder="R$ 0,00"
                         value={row.amount
                           ? `R$ ${Number(row.amount).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -706,10 +1159,76 @@ export default function TransacoesPage() {
                         disabled={isSaving}
                       />
                     </TableCell>
-                    {/* Eu / Parceira / % — auto */}
-                    <TableCell colSpan={3} className="text-xs text-muted-foreground text-center py-1.5">
-                      {isSaving ? "salvando..." : "calculado ao salvar"}
-                    </TableCell>
+                    {/* Eu / Parceira / % — divisão opcional */}
+                    {(() => {
+                      const conn = bankConnections.find((b) => b.id === row.bankConnectionId);
+                      const isShared = conn?.accountType === "SHARED";
+                      const defaultPct = isShared ? 50 : 100;
+                      const effectivePct = row.pct !== null ? row.pct : defaultPct;
+                      const amount = Number(row.amount) || 0;
+                      const myAmt = amount * effectivePct / 100;
+                      const partnerAmt = amount - myAmt;
+                      return (<>
+                        <TableCell className="text-right text-xs py-1.5">
+                          {formatBRL(myAmt)}
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground py-1.5">
+                          {formatBRL(partnerAmt)}
+                        </TableCell>
+                        <TableCell className="text-right py-1.5">
+                      {isSaving ? (
+                        <span className="text-xs text-muted-foreground">...</span>
+                      ) : (
+                        <Popover
+                          open={inlineSplitOpenUid === row.uid}
+                          onOpenChange={(open) => setInlineSplitOpenUid(open ? row.uid : null)}
+                        >
+                          <PopoverTrigger className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs hover:bg-muted transition-colors cursor-pointer tabular-nums">
+                            {effectivePct}/{100 - effectivePct}
+                          </PopoverTrigger>
+                          <PopoverContent side="left" className="w-64 p-4 space-y-3">
+                            <p className="text-xs font-medium">Divisão</p>
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-xs">
+                                <span className="font-medium">{myNickname ?? "Você"}: {row.pct ?? 50}%</span>
+                                <span className="text-muted-foreground">{partnerNickname ?? "Parceiro(a)"}: {100 - (row.pct ?? 50)}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                value={row.pct ?? 50}
+                                onChange={(e) => setInlineRows((prev) =>
+                                  prev.map((r) => r.uid === row.uid ? { ...r, pct: Number(e.target.value) } : r)
+                                )}
+                                className="w-full accent-primary"
+                              />
+                              <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>0%</span>
+                                <span>50%</span>
+                                <span>100%</span>
+                              </div>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <button
+                                className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                                onClick={() => {
+                                  setInlineRows((prev) => prev.map((r) => r.uid === row.uid ? { ...r, pct: null } : r));
+                                  setInlineSplitOpenUid(null);
+                                }}
+                              >
+                                Automático
+                              </button>
+                              <Button size="sm" className="h-7 text-xs" onClick={() => setInlineSplitOpenUid(null)}>
+                                OK
+                              </Button>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                        </TableCell>
+                      </>);
+                    })()}
                     {/* Actions */}
                     <TableCell className="py-1.5">
                       <div className="flex items-center gap-0.5">
@@ -735,6 +1254,7 @@ export default function TransacoesPage() {
                         </Button>
                       </div>
                     </TableCell>
+                  </>)}
                   </TableRow>
                 );
               })}
@@ -747,33 +1267,211 @@ export default function TransacoesPage() {
                   </TableCell>
                 </TableRow>
               ) : !loading && (
-                sorted.map((tx) => (
+                sorted.map((tx) => {
+                  /* ── Delete confirmation / deleting row ── */
+                  if (deletingTxId === tx.id) {
+                    return (
+                      <TableRow key={tx.id} className="bg-red-50 hover:bg-red-50">
+                        <SavingRow label="Excluindo" />
+                      </TableRow>
+                    );
+                  }
+                  if (confirmDeleteTxId === tx.id) {
+                    return (
+                      <TableRow key={tx.id} className="bg-red-50 hover:bg-red-50">
+                        <ConfirmDeleteRow
+                          name={tx.customName ?? tx.description}
+                          onConfirm={() => deleteTransaction(tx)}
+                          onCancel={() => setConfirmDeleteTxId(null)}
+                        />
+                      </TableRow>
+                    );
+                  }
+
+                  /* ── Quick-edit inline row ── */
+                  if (quickEditTxId === tx.id) {
+                    const isOwner = tx.owner.id === currentUserId;
+                    const conn = bankConnections.find((b) => b.id === quickEditForm.bankConnectionId);
+                    const isShared = conn?.accountType === "SHARED";
+                    const defaultPct = isShared ? 50 : 100;
+                    const effectivePct = quickEditForm.pct !== null ? quickEditForm.pct : defaultPct;
+                    const amount = Number(quickEditForm.amount) || 0;
+                    const myAmt = amount * effectivePct / 100;
+                    const partnerAmt = amount - myAmt;
+                    return (
+                      <TableRow key={tx.id} ref={quickEditRowRef} className="bg-blue-50 hover:bg-blue-50">
+                      {savingQuickEdit ? <SavingRow /> : (<>
+                        {/* Data */}
+                        <TableCell className="py-1.5">
+                          <input
+                            type="date"
+                            className="h-7 w-28 rounded border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                            value={quickEditForm.date}
+                            onChange={(e) => setQuickEditForm((f) => ({ ...f, date: e.target.value }))}
+                            onKeyDown={(e) => { if (e.key === "Escape") setQuickEditTxId(null); if (e.key === "Enter") saveQuickEdit(tx); }}
+                            disabled={savingQuickEdit}
+                          />
+                        </TableCell>
+                        {/* Descrição + Apelido */}
+                        <TableCell className="py-2 max-w-[220px]">
+                          <div className="flex flex-col gap-1 overflow-hidden">
+                            <input
+                              autoFocus
+                              type="text"
+                              className="h-7 w-full rounded border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                              placeholder="Descrição..."
+                              value={quickEditForm.description}
+                              onChange={(e) => setQuickEditForm((f) => ({ ...f, description: e.target.value }))}
+                              onKeyDown={(e) => { if (e.key === "Escape") setQuickEditTxId(null); if (e.key === "Enter") saveQuickEdit(tx); }}
+                              disabled={savingQuickEdit}
+                            />
+                            <input
+                              type="text"
+                              className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                              placeholder="Apelido (opcional)..."
+                              value={quickEditForm.customName}
+                              onChange={(e) => setQuickEditForm((f) => ({ ...f, customName: e.target.value }))}
+                              onKeyDown={(e) => { if (e.key === "Escape") setQuickEditTxId(null); if (e.key === "Enter") saveQuickEdit(tx); }}
+                              disabled={savingQuickEdit}
+                            />
+                          </div>
+                        </TableCell>
+                        {/* Categoria */}
+                        <TableCell className="py-1.5 min-w-[160px]">
+                          <CategoryCombobox
+                            categories={categories}
+                            value={quickEditForm.category}
+                            onChange={(v) => setQuickEditForm((f) => ({ ...f, category: v }))}
+                            placeholder="Categoria..."
+                            onCreateNew={async (name) => {
+                              await fetch("/api/categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+                              load(true);
+                            }}
+                          />
+                        </TableCell>
+                        {/* Conta */}
+                        <TableCell className="py-1.5">
+                          <select
+                            className="h-7 w-32 rounded border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                            value={quickEditForm.bankConnectionId}
+                            onChange={(e) => setQuickEditForm((f) => ({ ...f, bankConnectionId: e.target.value }))}
+                            disabled={savingQuickEdit}
+                          >
+                            {bankConnections.filter((b) => b.user.id === currentUserId || b.accountType === "SHARED").map((b) => (
+                              <option key={b.id} value={b.id}>{b.nickname ?? b.bankName}</option>
+                            ))}
+                          </select>
+                        </TableCell>
+                        {/* Valor */}
+                        <TableCell className="py-1.5 text-right">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-right focus:outline-none focus:ring-1 focus:ring-ring"
+                            placeholder="R$ 0,00"
+                            value={quickEditForm.amount
+                              ? `R$ ${Number(quickEditForm.amount).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              : ""}
+                            onChange={(e) => {
+                              const digits = e.target.value.replace(/\D/g, "");
+                              const numeric = digits ? (Number(digits) / 100).toString() : "";
+                              setQuickEditForm((f) => ({ ...f, amount: numeric }));
+                            }}
+                            onKeyDown={(e) => { if (e.key === "Escape") setQuickEditTxId(null); if (e.key === "Enter") saveQuickEdit(tx); }}
+                            disabled={savingQuickEdit}
+                          />
+                        </TableCell>
+                        {/* Vini / Pati / % */}
+                        <TableCell className="text-right text-xs py-1.5">{formatBRL(myAmt)}</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground py-1.5">{formatBRL(partnerAmt)}</TableCell>
+                        <TableCell className="text-right py-1.5">
+                          {savingQuickEdit ? (
+                            <span className="text-xs text-muted-foreground">...</span>
+                          ) : isOwner ? (
+                            <Popover open={quickEditSplitOpen} onOpenChange={setQuickEditSplitOpen}>
+                              <PopoverTrigger className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs hover:bg-muted transition-colors cursor-pointer tabular-nums">
+                                {effectivePct}/{100 - effectivePct}
+                              </PopoverTrigger>
+                              <PopoverContent side="left" className="w-64 p-4 space-y-3">
+                                <p className="text-xs font-medium">Divisão</p>
+                                <div className="space-y-2">
+                                  <div className="flex justify-between text-xs">
+                                    <span className="font-medium">{myNickname ?? "Você"}: {effectivePct}%</span>
+                                    <span className="text-muted-foreground">{partnerNickname ?? "Parceiro(a)"}: {100 - effectivePct}%</span>
+                                  </div>
+                                  <input type="range" min={0} max={100} value={effectivePct}
+                                    onChange={(e) => setQuickEditForm((f) => ({ ...f, pct: Number(e.target.value) }))}
+                                    className="w-full accent-primary" />
+                                  <div className="flex justify-between text-xs text-muted-foreground">
+                                    <span>0%</span><span>50%</span><span>100%</span>
+                                  </div>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                  <button className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                                    onClick={() => { setQuickEditForm((f) => ({ ...f, pct: null })); setQuickEditSplitOpen(false); }}>
+                                    Automático
+                                  </button>
+                                  <Button size="sm" className="h-7 text-xs" onClick={() => setQuickEditSplitOpen(false)}>OK</Button>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          ) : null}
+                        </TableCell>
+                        {/* Ações */}
+                        <TableCell className="py-1.5">
+                          <div className="flex items-center gap-0.5">
+                            <Button variant="ghost" size="icon" className="size-7 text-green-600 hover:text-green-700 hover:bg-green-50"
+                              title="Salvar (Enter)" onClick={() => saveQuickEdit(tx)} disabled={savingQuickEdit}>
+                              <Check className="size-3" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="size-7 text-muted-foreground hover:text-destructive"
+                              title="Cancelar (Esc)" onClick={() => setQuickEditTxId(null)} disabled={savingQuickEdit}>
+                              <X className="size-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </>)}
+                      </TableRow>
+                    );
+                  }
+
+                  /* ── Normal row ── */
+                  return (
                   <TableRow key={tx.id} className={tx.pendingReview ? "bg-yellow-50 hover:bg-yellow-100" : ""}>
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                       {format(new Date(tx.date), "dd/MM")}
                     </TableCell>
-                    <TableCell className="max-w-[220px]">
+                    <TableCell className="max-w-[220px] cursor-pointer" onClick={() => openQuickEdit(tx)}>
                       {tx.customName ? (
                         <>
                           <p className="text-sm font-medium truncate">{tx.customName}</p>
-                          <p className="text-xs text-muted-foreground truncate">{tx.description}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {transactionTypeLabel(tx.description) ?? shortPixLabel(tx.description)}
+                          </p>
                         </>
                       ) : (
-                        <p className="text-sm truncate">{tx.description}</p>
+                        <p className="text-sm truncate">{shortPixLabel(tx.description)}</p>
                       )}
                       <p className="text-xs text-muted-foreground">{tx.owner.name}</p>
-                      {tx.notes && (
+                      {tx.notes && isInstallmentNote(tx.notes) ? (
+                        <p className={`text-xs font-medium ${isLastInstallment(tx.notes) ? "text-amber-600" : "text-muted-foreground"}`}>
+                          {tx.notes}{isLastInstallment(tx.notes) ? " ✓" : ""}
+                        </p>
+                      ) : tx.notes ? (
                         <p className="text-xs text-muted-foreground italic truncate">{tx.notes}</p>
-                      )}
+                      ) : null}
                       {tx.pendingReview && (
                         <Badge className="text-xs mt-0.5 bg-yellow-100 text-yellow-800 border-yellow-300" variant="outline">
                           Revisão pendente
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="cursor-pointer" onClick={() => openQuickEdit(tx)}>
                       {tx.category ? (
-                        <Badge variant="outline" className="text-xs">{tx.category}</Badge>
+                        <Badge variant="outline" className="text-xs gap-1">
+                          {getCategoryIcon(tx.category) && <span>{getCategoryIcon(tx.category)}</span>}
+                          {tx.category}
+                        </Badge>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
@@ -827,7 +1525,7 @@ export default function TransacoesPage() {
                               if (open) {
                                 setSplitPopover({ txId: tx.id, pct: myPct, originalPct: myPct });
                               } else {
-                                if (splitPopover) saveSplitPopover(splitPopover.txId, splitPopover.pct, splitPopover.originalPct);
+                                if (splitPopover) saveSplitPopover(splitPopover.txId, splitPopover.pct, splitPopover.originalPct, tx.description);
                                 setSplitPopover(null);
                               }
                             }}
@@ -902,13 +1600,13 @@ export default function TransacoesPage() {
                         tx.owner.id === currentUserId ? (
                           <div className="flex items-center gap-0.5">
                             <Button variant="ghost" size="icon" className="size-7" onClick={() => openEdit(tx)}>
-                              <Pencil className="size-3" />
+                              <Info className="size-3.5" />
                             </Button>
                             <Button
                               variant="ghost"
                               size="icon"
                               className="size-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={() => deleteTransaction(tx)}
+                              onClick={() => { setQuickEditTxId(null); setConfirmDeleteTxId(tx.id); }}
                             >
                               <Trash2 className="size-3" />
                             </Button>
@@ -917,7 +1615,8 @@ export default function TransacoesPage() {
                       )}
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -926,16 +1625,49 @@ export default function TransacoesPage() {
       {/* Edit dialog */}
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Editar transação</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Mais informações</DialogTitle></DialogHeader>
           {editing && (
             <div className="space-y-4">
-              <div className="bg-muted/50 rounded p-3">
-                <p className="text-xs text-muted-foreground">Nome original do banco</p>
-                <p className="text-sm font-medium">{editing.description}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {formatBRL(Number(editing.amount))} · {format(new Date(editing.date), "dd/MM/yyyy")}
-                </p>
-              </div>
+              {(() => {
+                const pix = parsePixDescription(editing.description);
+                if (pix) {
+                  return (
+                    <div className="bg-muted/50 rounded p-3 space-y-1.5">
+                      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                        Pix {pix.direction}
+                      </p>
+                      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                        <span className="text-muted-foreground text-xs">{pix.direction === "enviada" ? "Para" : "De"}</span>
+                        <span className="font-medium truncate">{pix.name}</span>
+                        {pix.document && <>
+                          <span className="text-muted-foreground text-xs">Doc</span>
+                          <span className="text-xs">{pix.document}</span>
+                        </>}
+                        {pix.bank && <>
+                          <span className="text-muted-foreground text-xs">Banco</span>
+                          <span className="text-xs truncate">{pix.bank}</span>
+                        </>}
+                        {pix.agency && <>
+                          <span className="text-muted-foreground text-xs">Ag / Conta</span>
+                          <span className="text-xs">{pix.agency} / {pix.account}</span>
+                        </>}
+                      </div>
+                      <p className="text-xs text-muted-foreground pt-1">
+                        {formatBRL(Number(editing.amount))} · {format(new Date(editing.date), "dd/MM/yyyy")}
+                      </p>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="bg-muted/50 rounded p-3">
+                    <p className="text-xs text-muted-foreground">Nome original do banco</p>
+                    <p className="text-sm font-medium">{editing.description}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {formatBRL(Number(editing.amount))} · {format(new Date(editing.date), "dd/MM/yyyy")}
+                    </p>
+                  </div>
+                );
+              })()}
               <div className="space-y-2">
                 <Label>Apelido <span className="text-muted-foreground text-xs">(substitui o nome acima)</span></Label>
                 <Input
@@ -1000,8 +1732,59 @@ export default function TransacoesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Split rule prompt */}
+      <Dialog open={!!splitRulePrompt} onOpenChange={(open) => { if (!open) setSplitRulePrompt(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Criar regra de divisão?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Deseja que próximas compras com o nome{" "}
+            <strong className="text-foreground">&quot;{splitRulePrompt?.description}&quot;</strong>{" "}
+            sejam divididas automaticamente como{" "}
+            <strong className="text-foreground">
+              {isCurrentUserUser1
+                ? `você: ${splitRulePrompt?.myPct}% / parceiro(a): ${100 - (splitRulePrompt?.myPct ?? 0)}%`
+                : `parceiro(a): ${100 - (splitRulePrompt?.myPct ?? 0)}% / você: ${splitRulePrompt?.myPct}%`}
+            </strong>?
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setSplitRulePrompt(null)}>Não</Button>
+            <Button onClick={createSplitRuleFromPrompt} disabled={savingSplitRule}>
+              {savingSplitRule ? "Criando..." : "Sim, criar regra"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Category rule prompt */}
+      <Dialog open={!!catRulePrompt} onOpenChange={(open) => { if (!open) setCatRulePrompt(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Criar regra automática?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Deseja que próximas compras com o nome{" "}
+            <strong className="text-foreground">&quot;{catRulePrompt?.description}&quot;</strong>{" "}
+            sejam categorizadas automaticamente como{" "}
+            <strong className="text-foreground">{catRulePrompt?.category}</strong>?
+          </p>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <Button onClick={() => createCatRuleFromPrompt(true)} disabled={savingCatRule} className="w-full">
+              {savingCatRule ? "Aplicando..." : "Sim, para todas as compras"}
+            </Button>
+            <Button variant="outline" onClick={() => createCatRuleFromPrompt(false)} disabled={savingCatRule} className="w-full">
+              Sim, só para as próximas
+            </Button>
+            <Button variant="ghost" onClick={() => setCatRulePrompt(null)} disabled={savingCatRule} className="w-full">
+              Não
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* CSV Import dialog */}
-      <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) setImportResult(null); }}>
+      <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) { setDuplicateCheck(null); } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Importar extrato (CSV)</DialogTitle></DialogHeader>
           <div className="space-y-4">
@@ -1010,16 +1793,18 @@ export default function TransacoesPage() {
             </p>
             <div className="space-y-2">
               <Label>Conta</Label>
-              <Select value={importBankId} onValueChange={(v) => v && setImportBankId(v)}>
-                <SelectTrigger><SelectValue placeholder="Selecionar conta..." /></SelectTrigger>
-                <SelectContent>
-                  {bankConnections.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.bankName} ({b.accountType === "SHARED" ? "Compartilhada" : "Pessoal"})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                value={importBankId}
+                onChange={(e) => setImportBankId(e.target.value)}
+              >
+                <option value="">Selecionar conta...</option>
+                {bankConnections.filter((b) => b.user.id === currentUserId || b.accountType === "SHARED").map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {(b.nickname ?? b.bankName)} ({b.accountType === "SHARED" ? "Compartilhada" : "Pessoal"})
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-2">
               <Label>Arquivo CSV</Label>
@@ -1034,18 +1819,55 @@ export default function TransacoesPage() {
                   </>
                 )}
               </div>
-              <input ref={fileInputRef} type="file" accept=".csv,.txt" className="hidden" onChange={(e) => setImportFile(e.target.files?.[0] ?? null)} />
+              <input ref={fileInputRef} type="file" accept=".csv,.txt" className="hidden" onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                setImportFile(file);
+                if (file) autoDetectBank(file);
+              }} />
             </div>
-            {importResult && (
-              <div className={`p-3 rounded text-sm ${importResult.imported > 0 ? "bg-green-50 text-green-800" : "bg-muted"}`}>
-                ✓ {importResult.imported} transações importadas
-                {importResult.skipped > 0 && ` · ${importResult.skipped} ignoradas`}
+            {analyzing && (
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground">Analisando transações...</p>
+                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div className="h-full rounded-full bg-primary" style={{ width: "40%", animation: "indeterminate 1.4s ease-in-out infinite" }} />
+                </div>
+              </div>
+            )}
+            {importProgress && !analyzing && (
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Importando transações...</span>
+                  <span>{importProgress.processed} / {importProgress.total}</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all duration-200"
+                    style={{ width: `${importProgress.total > 0 ? (importProgress.processed / importProgress.total) * 100 : 0}%` }}
+                  />
+                </div>
               </div>
             )}
           </div>
+          {duplicateCheck && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+              <p className="text-sm font-medium text-amber-900">
+                Encontrei {duplicateCheck.duplicates} transaç{duplicateCheck.duplicates === 1 ? "ão idêntica" : "ões idênticas"} às já cadastradas
+                {duplicateCheck.total > duplicateCheck.duplicates && ` (de ${duplicateCheck.total} no arquivo)`}.
+              </p>
+              <p className="text-xs text-amber-700">O que deseja fazer com elas?</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => doImport(true)}>
+                  Ignorar duplicatas
+                </Button>
+                <Button size="sm" onClick={() => doImport(false)}>
+                  Adicionar mesmo assim
+                </Button>
+              </div>
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportOpen(false)}>Fechar</Button>
-            <Button onClick={runImport} disabled={importing || !importFile || !importBankId}>
+            <Button onClick={runImport} disabled={importing || !importFile || !importBankId || !!duplicateCheck}>
               {importing ? "Importando..." : "Importar"}
             </Button>
           </DialogFooter>

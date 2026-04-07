@@ -35,7 +35,6 @@ export function applySplitRules(
   }
 
   // Default: shared → 50/50; personal → 100% para quem é o dono
-  // user1 paga 100% se for o dono, 0% se for o parceiro
   let defaultPct1: Decimal;
   if (transaction.accountType === "SHARED") {
     defaultPct1 = new Decimal(50);
@@ -83,4 +82,21 @@ function computeSplit(
     amountUser2,
     appliedRuleId,
   };
+}
+
+// Aplica regras de categoria: retorna a categoria da primeira regra que bater na descrição.
+// matchValue pode conter múltiplos termos separados por vírgula — basta um deles bater.
+export function applyCategoryRules(
+  description: string,
+  rules: { matchValue: string; category: string; isActive: boolean }[]
+): string | null {
+  const desc = description.toLowerCase();
+  for (const rule of rules) {
+    if (!rule.isActive) continue;
+    const terms = rule.matchValue.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+    if (terms.some((term) => desc.includes(term))) {
+      return rule.category;
+    }
+  }
+  return null;
 }

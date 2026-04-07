@@ -25,7 +25,7 @@ const navItems = [
 ];
 
 const settingsItems = [
-  { href: "/regras", label: "Regras de Divisão", icon: Settings2 },
+  { href: "/regras", label: "Regras", icon: Settings2 },
   { href: "/categorias", label: "Categorias", icon: Tag },
   { href: "/contas", label: "Contas", icon: Building2 },
   { href: "/perfil", label: "Perfil", icon: User },

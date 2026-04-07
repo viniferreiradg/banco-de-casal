@@ -61,28 +61,36 @@ export default async function ResumoPage({
   const transactions = await prisma.transaction.findMany({
     where: {
       ownerUserId: { in: dbUser.couple!.members.map((m) => m.id) },
-      date: { gte: from, lte: to },
-      isShared: true,
+      billingMonth: mes,
     },
     include: { split: true, owner: { select: { id: true, name: true } } },
     orderBy: { date: "asc" },
   });
 
-  let myTotal = new Decimal(0);
-  let partnerTotal = new Decimal(0);
   let paidByMe = new Decimal(0);
   let paidByPartner = new Decimal(0);
+  // Parte bruta de cada um nas transações DO OUTRO
+  let myGrossOwed = new Decimal(0);
+  let partnerGrossOwed = new Decimal(0);
 
   for (const tx of transactions) {
     if (!tx.split) continue;
-    // amountUser1 = sempre a parte do user1 do casal (fixo, independente de quem comprou)
-    myTotal = myTotal.plus(isUser1 ? tx.split.amountUser1 : tx.split.amountUser2);
-    partnerTotal = partnerTotal.plus(isUser1 ? tx.split.amountUser2 : tx.split.amountUser1);
-    if (tx.ownerUserId === user.id) paidByMe = paidByMe.plus(tx.amount);
-    else paidByPartner = paidByPartner.plus(tx.amount);
+    if (tx.ownerUserId === user.id) {
+      paidByMe = paidByMe.plus(tx.amount);
+      // parceiro deve a mim a parte dele nas minhas transações
+      partnerGrossOwed = partnerGrossOwed.plus(isUser1 ? tx.split.amountUser2 : tx.split.amountUser1);
+    } else {
+      paidByPartner = paidByPartner.plus(tx.amount);
+      // eu devo ao parceiro a minha parte nas transações dele
+      myGrossOwed = myGrossOwed.plus(isUser1 ? tx.split.amountUser1 : tx.split.amountUser2);
+    }
   }
 
-  const balance = myTotal.minus(paidByMe);
+  // Saldo líquido: quem deve a quem depois de neteado
+  const myOwed      = Decimal.max(0, myGrossOwed.minus(partnerGrossOwed));
+  const partnerOwed = Decimal.max(0, partnerGrossOwed.minus(myGrossOwed));
+  // balance > 0 = eu devo ao parceiro; balance < 0 = parceiro me deve
+  const balance = myGrossOwed.minus(partnerGrossOwed);
 
   const summary = await prisma.monthlySummary.findUnique({
     where: { coupleId_month: { coupleId: dbUser.coupleId, month: mes } },
@@ -129,40 +137,36 @@ export default async function ResumoPage({
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <Card>
           <CardHeader className="pb-1 pt-3 px-3">
-            <CardTitle className="text-xs text-muted-foreground">Minha parte</CardTitle>
+            <CardTitle className="text-xs text-muted-foreground font-medium">Eu</CardTitle>
           </CardHeader>
-          <CardContent className="px-3 pb-3">
-            <p className="font-semibold">{formatBRL(myTotal)}</p>
+          <CardContent className="px-3 pb-3 space-y-1">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Gastei</span>
+              <span className="font-semibold">{formatBRL(paidByMe)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Devo</span>
+              <span className={`font-semibold ${myOwed.greaterThan(0) ? "text-red-600" : ""}`}>{formatBRL(myOwed)}</span>
+            </div>
           </CardContent>
         </Card>
         {partner && (
           <Card>
             <CardHeader className="pb-1 pt-3 px-3">
-              <CardTitle className="text-xs text-muted-foreground">Parte de {partner.name}</CardTitle>
+              <CardTitle className="text-xs text-muted-foreground font-medium">{partner.name}</CardTitle>
             </CardHeader>
-            <CardContent className="px-3 pb-3">
-              <p className="font-semibold">{formatBRL(partnerTotal)}</p>
-            </CardContent>
-          </Card>
-        )}
-        <Card>
-          <CardHeader className="pb-1 pt-3 px-3">
-            <CardTitle className="text-xs text-muted-foreground">Eu paguei</CardTitle>
-          </CardHeader>
-          <CardContent className="px-3 pb-3">
-            <p className="font-semibold">{formatBRL(paidByMe)}</p>
-          </CardContent>
-        </Card>
-        {partner && (
-          <Card>
-            <CardHeader className="pb-1 pt-3 px-3">
-              <CardTitle className="text-xs text-muted-foreground">{partner.name} pagou</CardTitle>
-            </CardHeader>
-            <CardContent className="px-3 pb-3">
-              <p className="font-semibold">{formatBRL(paidByPartner)}</p>
+            <CardContent className="px-3 pb-3 space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Gastou</span>
+                <span className="font-semibold">{formatBRL(paidByPartner)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Deve</span>
+                <span className={`font-semibold ${partnerOwed.greaterThan(0) ? "text-red-600" : ""}`}>{formatBRL(partnerOwed)}</span>
+              </div>
             </CardContent>
           </Card>
         )}

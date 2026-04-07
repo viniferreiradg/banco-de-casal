@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAccounts, getTransactions } from "@/lib/pluggy";
-import { applySplitRules } from "@/lib/split-engine";
+import { applySplitRules, applyCategoryRules } from "@/lib/split-engine";
+import { PRIMARY_CATEGORY_RULES } from "@/lib/primary-rules";
 import { resolveBillingMonth } from "@/lib/billing-month";
 import { Decimal } from "decimal.js";
 
@@ -21,7 +22,10 @@ export async function POST(request: NextRequest) {
       user: {
         include: {
           couple: {
-            include: { splitRules: { where: { isActive: true } } },
+            include: {
+              splitRules: { where: { isActive: true } },
+              categoryRules: { where: { isActive: true } },
+            },
           },
         },
       },
@@ -58,6 +62,11 @@ export async function syncBankConnection(bankConnection: {
         priority: number;
         isActive: boolean;
       }>;
+      categoryRules: Array<{
+        matchValue: string;
+        category: string;
+        isActive: boolean;
+      }>;
     } | null;
   };
 }): Promise<number> {
@@ -66,6 +75,7 @@ export async function syncBankConnection(bankConnection: {
 
   const accounts = await getAccounts(bankConnection.pluggyItemId);
   const rules = bankConnection.user.couple?.splitRules ?? [];
+  const categoryRules = bankConnection.user.couple?.categoryRules ?? [];
   const closingDay = bankConnection.user.couple?.closingDay ?? 5;
   const isCreditCard = bankConnection.isCreditCard ?? false;
 
@@ -112,7 +122,7 @@ export async function syncBankConnection(bankConnection: {
           billingMonth,
           description: ptx.description,
           amount,
-          category: ptx.category,
+          category: applyCategoryRules(ptx.description, categoryRules) ?? applyCategoryRules(ptx.description, PRIMARY_CATEGORY_RULES) ?? ptx.category,
           isShared: bankConnection.accountType === "SHARED",
           isCreditCard,
           bankConnectionId: bankConnection.id,

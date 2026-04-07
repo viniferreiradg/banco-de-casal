@@ -26,6 +26,7 @@ model User {
   invitesSent       CoupleInvite[]   @relation("InviteSender")
   categories        Category[]
   splitRules        SplitRule[]
+  categoryRules     CategoryRule[]
 
   @@map("users")
 }
@@ -39,6 +40,7 @@ model Couple {
 
   members          User[]         @relation("CoupleMembers")
   splitRules       SplitRule[]
+  categoryRules    CategoryRule[]
   monthlySummaries MonthlySummary[]
   invites          CoupleInvite[]
 
@@ -131,6 +133,24 @@ model SplitRule {
   appliedToSplits TransactionSplit[]
 
   @@map("split_rules")
+}
+
+model CategoryRule {
+  id         String   @id @default(cuid())
+  name       String
+  matchValue String   // substring a procurar na descrição da transação
+  category   String   // categoria a aplicar quando bater
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  coupleId String?
+  couple   Couple? @relation(fields: [coupleId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("category_rules")
 }
 
 model TransactionSplit {
