@@ -46,7 +46,7 @@ data,descricao,valor
 Regras:
 - data: DD/MM/YYYY
 - descricao: nome do estabelecimento limpo (sem códigos, sem abreviações desnecessárias, capitalize corretamente)
-- valor: número positivo com vírgula decimal, sem símbolo de moeda (ex: 45,90)
+- valor: número positivo com PONTO decimal, sem símbolo de moeda (ex: 45.90) — NUNCA use vírgula no valor pois o CSV usa vírgula como separador
 - Ignore: pagamentos recebidos, saldo anterior, totais, subtotais, linhas de cabeçalho, tarifas bancárias
 - Inclua parcelamentos (ex: "Panificadora 2/5" deve virar descricao "Panificadora")
 

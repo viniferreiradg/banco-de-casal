@@ -223,11 +223,11 @@ export async function POST(request: NextRequest) {
     if (rawTipo === "entrada") continue;
     const amount = parseAmount(rawAmount);
     if (amount === null || amount === 0) continue;
-    if (isNubankStyle) {
-      // Nubank: positive = expense, negative = payment (already filtered above)
+    if (isNubankStyle || isCreditCard) {
+      // Nubank / cartão de crédito: positivo = despesa, negativo = pagamento (já filtrado acima)
       if (amount < 0) continue;
     } else {
-      // BB/other debit: negative = expense; when no "tipo" column, skip positive (income) rows
+      // Débito (BB etc): negativo = despesa; sem coluna "tipo", pula positivos (receitas)
       if (tipoIdx === -1 && amount > 0) continue;
     }
     const rawDate = cols[dateIdx] ?? "";
