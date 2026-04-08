@@ -11,6 +11,7 @@ import {
   User,
   LogOut,
   Tag,
+  Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -22,6 +23,7 @@ const navItems = [
   { href: "/dashboard", label: "Início", icon: LayoutDashboard },
   { href: "/transacoes", label: "Transações", icon: List },
   { href: "/resumo", label: "Resumo do Mês", icon: BarChart3 },
+  { href: "/ferramentas", label: "Ferramentas", icon: Wrench },
 ];
 
 const settingsItems = [
