@@ -235,11 +235,13 @@ export default function RegrasPage() {
         ? await fetch(`/api/alias-rules/${editingAlias.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aliasForm) })
         : await fetch("/api/alias-rules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aliasForm) });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data.error ?? "Erro ao salvar regra.");
+        const text = await res.text().catch(() => "");
+        let msg = "Erro ao salvar regra.";
+        try { msg = JSON.parse(text).error ?? `HTTP ${res.status}: ${text}`; } catch { msg = `HTTP ${res.status}: ${text}`; }
+        toast.error(msg);
       }
-    } catch {
-      toast.error("Erro ao salvar regra.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao salvar regra.");
     }
     await loadAliasRules();
   }
