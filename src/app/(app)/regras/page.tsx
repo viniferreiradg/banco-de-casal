@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -229,12 +230,18 @@ export default function RegrasPage() {
   async function saveAlias() {
     setAliasOpen(false);
     setAliasLoading(true);
-    if (editingAlias) {
-      await fetch(`/api/alias-rules/${editingAlias.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aliasForm) });
-    } else {
-      await fetch("/api/alias-rules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aliasForm) });
+    try {
+      const res = editingAlias
+        ? await fetch(`/api/alias-rules/${editingAlias.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aliasForm) })
+        : await fetch("/api/alias-rules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aliasForm) });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error ?? "Erro ao salvar regra.");
+      }
+    } catch {
+      toast.error("Erro ao salvar regra.");
     }
-    loadAliasRules();
+    await loadAliasRules();
   }
 
   async function toggleAlias(rule: AliasRule) {
