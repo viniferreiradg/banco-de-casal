@@ -121,10 +121,15 @@ export default function RegrasPage() {
 
   const loadAliasRules = useCallback(async () => {
     setAliasLoading(true);
-    const res = await fetch("/api/alias-rules");
-    const data = await res.json();
-    setAliasRules(data.rules ?? []);
-    setAliasLoading(false);
+    try {
+      const res = await fetch("/api/alias-rules");
+      const data = await res.json();
+      setAliasRules(data.rules ?? []);
+    } catch {
+      setAliasRules([]);
+    } finally {
+      setAliasLoading(false);
+    }
   }, []);
 
   useEffect(() => {
