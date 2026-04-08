@@ -287,10 +287,17 @@ export async function POST(request: NextRequest) {
         const date = parseDate(rawDate)!;
         const amount = parseAmount(rawAmount)!;
         const description = cleanDescription(rawDescription);
-        const category = rawCategory || inferCategory(description) || undefined;
+        const rawCategoryFallback = rawCategory || inferCategory(description) || undefined;
         const displayName = extractDisplayName(description);
         const decimalAmount = new Decimal(Math.abs(amount));
         const billingMonth = resolveBillingMonth(date, isCreditCard, closingDay);
+
+        // Resolve final category BEFORE split, so category-based rules can match correctly
+        const resolvedCategory =
+          applyCategoryRules(description, categoryRules) ??
+          applyCategoryRules(description, PRIMARY_CATEGORY_RULES) ??
+          rawCategoryFallback ??
+          (isCreditCard ? "Crédito" : null);
 
         if (skipDuplicates) {
           const existing = await prisma.transaction.findFirst({
@@ -305,14 +312,14 @@ export async function POST(request: NextRequest) {
         }
 
         const split = applySplitRules(
-          { description, category: category ?? null, amount: decimalAmount, accountType: bankConnection.accountType as "SHARED" | "PERSONAL", ownerIsUser1 },
+          { description, category: resolvedCategory, amount: decimalAmount, accountType: bankConnection.accountType as "SHARED" | "PERSONAL", ownerIsUser1 },
           rules as Parameters<typeof applySplitRules>[1]
         );
 
         await prisma.transaction.create({
           data: {
             date, billingMonth, description, amount: decimalAmount,
-            category: applyCategoryRules(description, categoryRules) ?? applyCategoryRules(description, PRIMARY_CATEGORY_RULES) ?? category ?? (isCreditCard ? "Crédito" : null),
+            category: resolvedCategory,
             customName: displayName?.customName ?? null,
             notes: displayName?.notes ?? null,
             isShared: bankConnection.accountType === "SHARED",
