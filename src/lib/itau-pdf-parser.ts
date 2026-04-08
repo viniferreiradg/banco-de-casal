@@ -66,16 +66,18 @@ async function extractLines(pdfjs: typeof import("pdfjs-dist"), data: Uint8Array
     const tc   = await page.getTextContent({ includeMarkedContent: false });
 
     // Collect items with coordinates
-    type ItemPos = { text: string; x: number; y: number; endX: number };
+    type ItemPos = { text: string; x: number; y: number; endX: number; width: number; fontSize: number };
     const items: ItemPos[] = [];
 
     for (const item of tc.items) {
       const ti = item as TextItem;
       if (!ti.str || !ti.str.trim()) continue;
-      const x    = ti.transform[4];
-      const y    = vp.height - ti.transform[5]; // flip: PDF y is bottom-up
-      const endX = x + Math.abs(ti.width ?? 0);
-      items.push({ text: ti.str, x, y, endX });
+      const x        = ti.transform[4];
+      const y        = vp.height - ti.transform[5]; // flip: PDF y is bottom-up
+      const fontSize = Math.abs(ti.transform[0]) || 8;
+      const width    = ti.width ?? 0;
+      const endX     = x + Math.abs(width);
+      items.push({ text: ti.str, x, y, endX, width, fontSize });
     }
 
     if (items.length === 0) continue;
@@ -101,24 +103,46 @@ async function extractLines(pdfjs: typeof import("pdfjs-dist"), data: Uint8Array
     }
     rows.push(currentRow);
 
-    // For each row, merge adjacent fragments into words then join with spaces
+    // For each row, merge adjacent fragments into words then join with spaces.
+    //
+    // Key insight: pdfjs often reports item.width = 0 for character-by-character
+    // encoded PDFs (common in Itaú statements). When that happens, prevEndX stays
+    // at item.x instead of advancing, making the gap between adjacent fragments
+    // appear huge (equal to the fragment's visual width) and causing fragmentation.
+    //
+    // Fix: when item.width ≤ 0, estimate it as charCount × fontSize × 0.58
+    // (58% cap-height ratio is a safe average for uppercase Latin fonts).
+    // Then use a threshold of fontSize × 0.25 (25% of point size).
+    // A word space in this font is ~2 pt, so fragments glued with 0-pt gaps
+    // merge correctly while real word boundaries (≥ 2 pt) are preserved.
     for (const row of rows) {
       let line = "";
       let prevEndX = -Infinity;
+      let prevFontSize = 8; // fallback
 
       for (const item of row) {
+        const fontSize = item.fontSize || prevFontSize;
+        // Use reported width if reliable; otherwise estimate from char count
+        const estimatedWidth =
+          Math.abs(item.width) > 0.5
+            ? Math.abs(item.width)
+            : item.text.length * fontSize * 0.58;
+
         const gap = item.x - prevEndX;
-        // Gap < 1 unit → same word fragment; add without space
-        // Gap 1-6 units → tight but still the same word
-        // Gap > 6 units → word boundary
+        // Threshold: 25% of font size (~2 units for 8pt) separates words
+        const threshold = fontSize * 0.25;
+
         if (prevEndX === -Infinity) {
           line = item.text;
-        } else if (gap <= 6) {
+        } else if (gap <= threshold) {
+          // Gap is within one "space width" → same word, merge directly
           line += item.text;
         } else {
           line += " " + item.text;
         }
-        prevEndX = item.endX;
+
+        prevEndX = item.x + estimatedWidth;
+        prevFontSize = fontSize;
       }
 
       const trimmed = line.trim();
