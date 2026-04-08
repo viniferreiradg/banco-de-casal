@@ -206,6 +206,24 @@ export async function POST(request: NextRequest) {
     );
   };
 
+  // Early incompatibility check: scan ALL raw amounts (before sign filtering) to detect
+  // if this is a credit card CSV uploaded to a debit account (or vice versa)
+  if (!isCreditCard && !isNubankStyle && tipoIdx === -1) {
+    const rawAmounts: number[] = [];
+    for (let i = 1; i < rawLines.length; i++) {
+      const cols = parseCsvLine(rawLines[i], sep);
+      if (cols.length <= amtIdx) continue;
+      const amount = parseAmount(cols[amtIdx] ?? "");
+      if (amount !== null && amount !== 0) rawAmounts.push(amount);
+    }
+    const allPositiveRaw = rawAmounts.length > 0 && rawAmounts.every((a) => a > 0);
+    if (allPositiveRaw) {
+      return NextResponse.json({
+        error: "Este CSV parece ser de um cartão de crédito (todos os valores são positivos), mas a conta selecionada não está marcada como cartão de crédito. Selecione a conta correta ou edite a conta em Contas → marque como cartão de crédito.",
+      }, { status: 400 });
+    }
+  }
+
   // Pre-scan: collect valid rows to know total before streaming
   type ValidRow = { rawDate: string; rawDescription: string; rawAmount: string; rawCategory: string };
   const validRows: ValidRow[] = [];
@@ -236,14 +254,6 @@ export async function POST(request: NextRequest) {
   }
 
   const total = validRows.length;
-
-  // Incompatibility check: if all values are positive, this is likely a credit card CSV
-  const allPositive = validRows.length > 0 && validRows.every(r => (parseAmount(r.rawAmount) ?? 0) > 0);
-  if (allPositive && !isCreditCard) {
-    return NextResponse.json({
-      error: "Este CSV parece ser de um cartão de crédito (todos os valores são positivos), mas a conta selecionada não está marcada como cartão de crédito. Selecione a conta correta ou edite a conta em Contas → marque como cartão de crédito.",
-    }, { status: 400 });
-  }
 
   // Phase 1: checkOnly — count duplicates and return JSON (no streaming)
   if (checkOnly) {
