@@ -266,7 +266,6 @@ export default function TransacoesPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importBankId, setImportBankId] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
-  const [importIsPdf, setImportIsPdf] = useState(false);
   const [importing, setImporting] = useState(false);
   const [duplicateCheck, setDuplicateCheck] = useState<{ total: number; duplicates: number } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -722,18 +721,6 @@ export default function TransacoesPage() {
   // ── CSV import ───────────────────────────────────────────────
 
   function autoDetectBank(file: File) {
-    // PDF: flag as PDF and try to match an Itaú connection
-    if (file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf") {
-      setImportIsPdf(true);
-      const myConnections = bankConnections.filter(
-        (b) => b.user.id === currentUserId || b.accountType === "SHARED"
-      );
-      const match = myConnections.find((b) => b.bankName.toLowerCase().includes("itau") || b.bankName.toLowerCase().includes("itaú"));
-      if (match) setImportBankId(match.id);
-      return;
-    }
-
-    setImportIsPdf(false);
     const reader = new FileReader();
     reader.onload = (e) => {
       const firstLine = (e.target?.result as string ?? "").split(/\r?\n/)[0].toLowerCase();
@@ -778,8 +765,7 @@ export default function TransacoesPage() {
       checkFd.append("file", importFile);
       checkFd.append("bankConnectionId", importBankId);
       checkFd.append("checkOnly", "true");
-      const importEndpoint = importIsPdf ? "/api/transactions/import/pdf" : "/api/transactions/import";
-      const checkRes = await fetch(importEndpoint, { method: "POST", body: checkFd });
+      const checkRes = await fetch("/api/transactions/import", { method: "POST", body: checkFd });
       setAnalyzing(false);
       if (!checkRes.ok) {
         const data = await checkRes.json().catch(() => ({}));
@@ -814,8 +800,7 @@ export default function TransacoesPage() {
       fd.append("file", importFile);
       fd.append("bankConnectionId", importBankId);
       fd.append("skipDuplicates", skipDuplicates ? "true" : "false");
-      const importEndpoint = importIsPdf ? "/api/transactions/import/pdf" : "/api/transactions/import";
-      const res = await fetch(importEndpoint, { method: "POST", body: fd });
+      const res = await fetch("/api/transactions/import", { method: "POST", body: fd });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error ?? "Erro ao importar.");
@@ -841,7 +826,6 @@ export default function TransacoesPage() {
             setImportOpen(false);
             setImportFile(null);
             setImportBankId("");
-            setImportIsPdf(false);
             const skippedMsg = msg.skipped > 0 ? ` · ${msg.skipped} ignoradas` : "";
             toast.success(`${msg.imported} transações importadas${skippedMsg}`);
             load(true);
@@ -1800,21 +1784,14 @@ export default function TransacoesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* CSV / PDF Import dialog */}
-      <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) { setDuplicateCheck(null); setImportIsPdf(false); } }}>
+      {/* CSV Import dialog */}
+      <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) { setDuplicateCheck(null); } }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Importar extrato (CSV / PDF)</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Importar extrato (CSV)</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            {importIsPdf ? (
-              <p className="text-sm text-muted-foreground">
-                Fatura Itaú detectada. Selecione a conta do cartão abaixo e clique em <strong>Importar</strong>.
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Exporte o extrato do seu banco em CSV. O arquivo precisa ter colunas de <strong>data</strong>, <strong>descrição</strong> e <strong>valor</strong>.
-                Ou importe a fatura do Itaú em <strong>PDF</strong>.
-              </p>
-            )}
+            <p className="text-sm text-muted-foreground">
+              Exporte o extrato do seu banco em CSV. O arquivo precisa ter colunas de <strong>data</strong>, <strong>descrição</strong> e <strong>valor</strong>.
+            </p>
             <div className="space-y-2">
               <Label>Conta</Label>
               <select
@@ -1831,22 +1808,21 @@ export default function TransacoesPage() {
               </select>
             </div>
             <div className="space-y-2">
-              <Label>{importIsPdf ? "Arquivo PDF" : "Arquivo CSV"}</Label>
+              <Label>Arquivo CSV</Label>
               <div className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => fileInputRef.current?.click()}>
                 {importFile ? (
                   <div>
                     <p className="text-sm font-medium">{importFile.name}</p>
-                    {importIsPdf && <p className="text-xs text-muted-foreground mt-1">Fatura Itaú (PDF)</p>}
                   </div>
                 ) : (
                   <>
                     <Upload className="size-6 mx-auto mb-2 text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">Clique para selecionar</p>
-                    <p className="text-xs text-muted-foreground mt-1">.csv, .txt, .pdf (Itaú)</p>
+                    <p className="text-xs text-muted-foreground mt-1">.csv, .txt</p>
                   </>
                 )}
               </div>
-              <input ref={fileInputRef} type="file" accept=".csv,.txt,.pdf" className="hidden" onChange={(e) => {
+              <input ref={fileInputRef} type="file" accept=".csv,.txt" className="hidden" onChange={(e) => {
                 const file = e.target.files?.[0] ?? null;
                 setImportFile(file);
                 if (file) autoDetectBank(file);
