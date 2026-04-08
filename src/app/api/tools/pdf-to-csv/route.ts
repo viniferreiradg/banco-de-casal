@@ -19,12 +19,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "O arquivo deve ser um PDF." }, { status: 400 });
   }
 
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json({ error: "ANTHROPIC_API_KEY não configurada no servidor." }, { status: 500 });
+  }
+
   const bytes = await file.arrayBuffer();
   const pdfBase64 = Buffer.from(bytes).toString("base64");
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const response = await client.messages.create({
+  let response;
+  try {
+    response = await client.messages.create({
     model: "claude-opus-4-5",
     max_tokens: 8096,
     messages: [
@@ -58,7 +64,11 @@ Retorne APENAS as linhas CSV, uma por linha, nada mais.`,
         ],
       },
     ],
-  });
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Erro desconhecido na API do Claude.";
+    return NextResponse.json({ error: `Erro ao chamar Claude API: ${msg}` }, { status: 502 });
+  }
 
   const csvText = response.content
     .filter((block) => block.type === "text")
