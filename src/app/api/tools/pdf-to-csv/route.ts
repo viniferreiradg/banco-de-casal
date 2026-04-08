@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -19,35 +19,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "O arquivo deve ser um PDF." }, { status: 400 });
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: "ANTHROPIC_API_KEY não configurada no servidor." }, { status: 500 });
+  if (!process.env.GEMINI_API_KEY) {
+    return NextResponse.json({ error: "GEMINI_API_KEY não configurada no servidor." }, { status: 500 });
   }
 
   const bytes = await file.arrayBuffer();
   const pdfBase64 = Buffer.from(bytes).toString("base64");
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-  let response;
+  let result;
   try {
-    response = await client.messages.create({
-    model: "claude-opus-4-5",
-    max_tokens: 8096,
-    messages: [
+    result = await model.generateContent([
       {
-        role: "user",
-        content: [
-          {
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: "application/pdf",
-              data: pdfBase64,
-            },
-          },
-          {
-            type: "text",
-            text: `Extraia todas as transações de compra desta fatura bancária em CSV.
+        inlineData: {
+          mimeType: "application/pdf",
+          data: pdfBase64,
+        },
+      },
+      `Extraia todas as transações de compra desta fatura bancária em CSV.
 
 Formato obrigatório — sem cabeçalho, sem bloco de código markdown, sem texto extra:
 data,descricao,valor
@@ -57,24 +48,16 @@ Regras:
 - descricao: nome do estabelecimento limpo (sem códigos, sem abreviações desnecessárias, capitalize corretamente)
 - valor: número positivo com vírgula decimal, sem símbolo de moeda (ex: 45,90)
 - Ignore: pagamentos recebidos, saldo anterior, totais, subtotais, linhas de cabeçalho, tarifas bancárias
-- Inclua parcelamentos (ex: "Panificadora Padeirinhl 2/5" deve virar descricao "Panificadora Padeirinhl")
+- Inclua parcelamentos (ex: "Panificadora 2/5" deve virar descricao "Panificadora")
 
 Retorne APENAS as linhas CSV, uma por linha, nada mais.`,
-          },
-        ],
-      },
-    ],
-    });
+    ]);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro desconhecido na API do Claude.";
-    return NextResponse.json({ error: `Erro ao chamar Claude API: ${msg}` }, { status: 502 });
+    const msg = err instanceof Error ? err.message : "Erro desconhecido.";
+    return NextResponse.json({ error: `Erro ao chamar Gemini API: ${msg}` }, { status: 502 });
   }
 
-  const csvText = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => (block as { type: "text"; text: string }).text)
-    .join("")
-    .trim();
+  const csvText = result.response.text().trim();
 
   if (!csvText) {
     return NextResponse.json({ error: "Não foi possível extrair transações do PDF." }, { status: 422 });
