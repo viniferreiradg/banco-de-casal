@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { Decimal } from "decimal.js";
-import { applySplitRules, applyCategoryRules } from "@/lib/split-engine";
+import { applySplitRules, applyCategoryRules, applyAliasRules } from "@/lib/split-engine";
 import { PRIMARY_CATEGORY_RULES } from "@/lib/primary-rules";
 import { resolveBillingMonth } from "@/lib/billing-month";
 
@@ -133,6 +133,7 @@ export async function POST(request: NextRequest) {
             include: {
               splitRules: { where: { isActive: true } },
               categoryRules: { where: { isActive: true } },
+              aliasRules: { where: { isActive: true } },
             },
           },
         },
@@ -184,6 +185,7 @@ export async function POST(request: NextRequest) {
 
   const rules = bankConnection.user.couple?.splitRules ?? [];
   const categoryRules = bankConnection.user.couple?.categoryRules ?? [];
+  const aliasRules = bankConnection.user.couple?.aliasRules ?? [];
   const closingDay = bankConnection.user.couple?.closingDay ?? 5;
   const isCreditCard = bankConnection.isCreditCard ?? false;
   const ownerIsUser1 = bankConnection.user.couple
@@ -288,7 +290,10 @@ export async function POST(request: NextRequest) {
         const amount = parseAmount(rawAmount)!;
         const description = cleanDescription(rawDescription);
         const rawCategoryFallback = rawCategory || inferCategory(description) || undefined;
-        const displayName = extractDisplayName(description);
+        const aliasCustomName = applyAliasRules(description, aliasRules);
+        const displayName = aliasCustomName
+          ? { customName: aliasCustomName, notes: undefined }
+          : extractDisplayName(description);
         const decimalAmount = new Decimal(Math.abs(amount));
         const billingMonth = resolveBillingMonth(date, isCreditCard, closingDay);
 

@@ -27,6 +27,7 @@ model User {
   categories        Category[]
   splitRules        SplitRule[]
   categoryRules     CategoryRule[]
+  aliasRules        AliasRule[]
 
   @@map("users")
 }
@@ -41,6 +42,7 @@ model Couple {
   members          User[]         @relation("CoupleMembers")
   splitRules       SplitRule[]
   categoryRules    CategoryRule[]
+  aliasRules       AliasRule[]
   monthlySummaries MonthlySummary[]
   invites          CoupleInvite[]
 
@@ -151,6 +153,24 @@ model CategoryRule {
   user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("category_rules")
+}
+
+model AliasRule {
+  id         String   @id @default(cuid())
+  name       String
+  matchValue String   // comma-separated keywords to match in description
+  customName String   // the alias to apply
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  coupleId String?
+  couple   Couple? @relation(fields: [coupleId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("alias_rules")
 }
 
 model TransactionSplit {

@@ -100,3 +100,20 @@ export function applyCategoryRules(
   }
   return null;
 }
+
+// Aplica regras de apelido: retorna o customName da primeira regra que bater na descrição.
+// matchValue pode conter múltiplos termos separados por vírgula — basta um deles bater.
+export function applyAliasRules(
+  description: string,
+  rules: { matchValue: string; customName: string; isActive: boolean }[]
+): string | null {
+  const desc = description.toLowerCase();
+  for (const rule of rules) {
+    if (!rule.isActive) continue;
+    const terms = rule.matchValue.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+    if (terms.some((term) => desc.includes(term))) {
+      return rule.customName;
+    }
+  }
+  return null;
+}

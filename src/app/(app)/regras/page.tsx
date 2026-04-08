@@ -48,6 +48,15 @@ interface CategoryRule {
   userId: string | null;
 }
 
+interface AliasRule {
+  id: string;
+  name: string;
+  matchValue: string;
+  customName: string;
+  isActive: boolean;
+  userId: string | null;
+}
+
 const FIELD_LABELS: Record<string, string> = {
   CATEGORY: "Categoria",
   DESCRIPTION: "Descrição contém",
@@ -79,6 +88,13 @@ export default function RegrasPage() {
   const [editingCat, setEditingCat] = useState<CategoryRule | null>(null);
   const [catForm, setCatForm] = useState({ name: "", matchValue: [] as string[], category: "" });
 
+  // ── Alias rules state ─────────────────────────────────────────
+  const [aliasRules, setAliasRules] = useState<AliasRule[]>([]);
+  const [aliasLoading, setAliasLoading] = useState(true);
+  const [aliasOpen, setAliasOpen] = useState(false);
+  const [editingAlias, setEditingAlias] = useState<AliasRule | null>(null);
+  const [aliasForm, setAliasForm] = useState({ name: "", matchValue: [] as string[], customName: "" });
+
   // ── Shared ────────────────────────────────────────────────────
   const [categories, setCategories] = useState<{ id: string; name: string; icon: string | null }[]>([]);
 
@@ -103,10 +119,19 @@ export default function RegrasPage() {
     setCatLoading(false);
   }, []);
 
+  const loadAliasRules = useCallback(async () => {
+    setAliasLoading(true);
+    const res = await fetch("/api/alias-rules");
+    const data = await res.json();
+    setAliasRules(data.rules ?? []);
+    setAliasLoading(false);
+  }, []);
+
   useEffect(() => {
     loadSplitRules();
     loadCategoryRules();
-  }, [loadSplitRules, loadCategoryRules]);
+    loadAliasRules();
+  }, [loadSplitRules, loadCategoryRules, loadAliasRules]);
 
   // ── Split rule actions ────────────────────────────────────────
   function openCreateSplit() {
@@ -182,6 +207,43 @@ export default function RegrasPage() {
     loadCategoryRules();
   }
 
+  // ── Alias rule actions ────────────────────────────────────────
+  function openCreateAlias() {
+    setEditingAlias(null);
+    setAliasForm({ name: "", matchValue: [], customName: "" });
+    setAliasOpen(true);
+  }
+
+  function openEditAlias(rule: AliasRule) {
+    setEditingAlias(rule);
+    const tags = rule.matchValue.split(",").map((t) => t.trim()).filter(Boolean);
+    setAliasForm({ name: rule.name, matchValue: tags, customName: rule.customName });
+    setAliasOpen(true);
+  }
+
+  async function saveAlias() {
+    setAliasOpen(false);
+    setAliasLoading(true);
+    if (editingAlias) {
+      await fetch(`/api/alias-rules/${editingAlias.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aliasForm) });
+    } else {
+      await fetch("/api/alias-rules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(aliasForm) });
+    }
+    loadAliasRules();
+  }
+
+  async function toggleAlias(rule: AliasRule) {
+    setAliasLoading(true);
+    await fetch(`/api/alias-rules/${rule.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isActive: !rule.isActive }) });
+    loadAliasRules();
+  }
+
+  async function deleteAlias(id: string) {
+    if (!confirm("Excluir esta regra?")) return;
+    await fetch(`/api/alias-rules/${id}`, { method: "DELETE" });
+    loadAliasRules();
+  }
+
   async function refreshCategories() {
     const res = await fetch("/api/categories");
     const data = await res.json();
@@ -199,6 +261,7 @@ export default function RegrasPage() {
         <TabsList>
           <TabsTrigger value="divisao">Regras de Divisão</TabsTrigger>
           <TabsTrigger value="categoria">Regras de Categoria</TabsTrigger>
+          <TabsTrigger value="apelido">Regras de Apelido</TabsTrigger>
           <TabsTrigger value="primarias">Regras primárias</TabsTrigger>
         </TabsList>
 
@@ -341,6 +404,69 @@ export default function RegrasPage() {
           )}
         </TabsContent>
 
+        {/* ── Aba Apelido ──────────────────────────────────────── */}
+        <TabsContent value="apelido" className="space-y-4 mt-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">Aplica apelidos automáticos ao importar transações</p>
+            <Button onClick={openCreateAlias} size="sm">
+              <Plus className="size-4 mr-2" />
+              Nova regra
+            </Button>
+          </div>
+
+          {aliasLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 p-4 rounded-lg border">
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+                    <div className="h-3 w-56 animate-pulse rounded bg-muted" />
+                  </div>
+                  <div className="flex gap-1">
+                    <div className="size-7 animate-pulse rounded bg-muted" />
+                    <div className="size-7 animate-pulse rounded bg-muted" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : aliasRules.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <p>Nenhuma regra criada ainda.</p>
+              <p className="text-sm mt-1">Ex: se contiver &quot;BECO DA LUA&quot; → apelido &quot;Lavanderia de tapete&quot;.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {aliasRules.map((rule) => (
+                <div key={rule.id} className={`flex items-center gap-4 p-4 rounded-lg border transition-opacity ${rule.isActive ? "" : "opacity-50"}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-sm">{rule.name}</p>
+                      {!rule.isActive && <Badge variant="outline" className="text-xs">inativa</Badge>}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 flex flex-wrap items-center gap-1">
+                      {rule.matchValue.split(",").map((t) => t.trim()).filter(Boolean).map((t) => (
+                        <span key={t} className="inline-flex rounded bg-secondary text-secondary-foreground px-1.5 py-0.5 text-xs">{t}</span>
+                      ))}
+                      <span>→ <span className="text-primary font-medium">&quot;{rule.customName}&quot;</span></span>
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button variant="ghost" size="icon" className="size-7" onClick={() => toggleAlias(rule)}>
+                      {rule.isActive ? <ToggleRight className="size-4 text-green-600" /> : <ToggleLeft className="size-4" />}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-7" onClick={() => openEditAlias(rule)}>
+                      <Pencil className="size-3" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-7 text-destructive" onClick={() => deleteAlias(rule.id)}>
+                      <Trash2 className="size-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
         {/* ── Aba Regras Primárias ─────────────────────────────────── */}
         <TabsContent value="primarias" className="space-y-4 mt-4">
           <div className="flex items-start gap-3 rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
@@ -464,6 +590,36 @@ export default function RegrasPage() {
             <Button variant="outline" onClick={() => setCatOpen(false)}>Cancelar</Button>
             <Button onClick={saveCat} disabled={!catForm.name || catForm.matchValue.length === 0 || !catForm.category}>
               {editingCat ? "Salvar" : "Criar regra"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog Regra de Apelido ─────────────────────────── */}
+      <Dialog open={aliasOpen} onOpenChange={setAliasOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingAlias ? "Editar regra de apelido" : "Nova regra de apelido"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nome da regra</Label>
+              <Input value={aliasForm.name} onChange={(e) => setAliasForm({ ...aliasForm, name: e.target.value })} placeholder="Ex: Lavanderia" />
+            </div>
+            <div className="space-y-2">
+              <Label>Se contiver no nome</Label>
+              <TagInput value={aliasForm.matchValue} onChange={(tags) => setAliasForm({ ...aliasForm, matchValue: tags })} placeholder="Ex: beco da lua, barla..." />
+              <p className="text-xs text-muted-foreground">Digite um termo e pressione vírgula ou Enter para adicionar mais.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Apelido a aplicar</Label>
+              <Input value={aliasForm.customName} onChange={(e) => setAliasForm({ ...aliasForm, customName: e.target.value })} placeholder="Ex: Lavanderia de tapete" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAliasOpen(false)}>Cancelar</Button>
+            <Button onClick={saveAlias} disabled={!aliasForm.name || aliasForm.matchValue.length === 0 || !aliasForm.customName}>
+              {editingAlias ? "Salvar" : "Criar regra"}
             </Button>
           </DialogFooter>
         </DialogContent>
