@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
   const pdfBase64 = Buffer.from(bytes).toString("base64");
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   let result;
   try {
@@ -57,11 +57,14 @@ Retorne APENAS as linhas CSV, uma por linha, nada mais.`,
     return NextResponse.json({ error: `Erro ao chamar Gemini API: ${msg}` }, { status: 502 });
   }
 
-  const csvText = result.response.text().trim();
+  const rawText = result.response.text().trim();
 
-  if (!csvText) {
+  if (!rawText) {
     return NextResponse.json({ error: "Não foi possível extrair transações do PDF." }, { status: 422 });
   }
+
+  // Garante que o CSV sempre tem o cabeçalho correto
+  const csvText = "data,descricao,valor\n" + rawText;
 
   return new Response(csvText, {
     headers: {
