@@ -237,6 +237,14 @@ export async function POST(request: NextRequest) {
 
   const total = validRows.length;
 
+  // Incompatibility check: if all values are positive, this is likely a credit card CSV
+  const allPositive = validRows.length > 0 && validRows.every(r => (parseAmount(r.rawAmount) ?? 0) > 0);
+  if (allPositive && !isCreditCard) {
+    return NextResponse.json({
+      error: "Este CSV parece ser de um cartão de crédito (todos os valores são positivos), mas a conta selecionada não está marcada como cartão de crédito. Selecione a conta correta ou edite a conta em Contas → marque como cartão de crédito.",
+    }, { status: 400 });
+  }
+
   // Phase 1: checkOnly — count duplicates and return JSON (no streaming)
   if (checkOnly) {
     let duplicates = 0;

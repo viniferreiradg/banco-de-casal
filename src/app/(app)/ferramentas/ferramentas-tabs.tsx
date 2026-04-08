@@ -4,7 +4,21 @@ import { FileText } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PdfToCsvTool } from "./pdf-to-csv";
 
-export function FerramentasTabs() {
+interface BankConnection {
+  id: string;
+  bankName: string;
+  nickname: string | null;
+  accountType: string;
+  isCreditCard: boolean;
+  userId: string;
+}
+
+interface Props {
+  bankConnections: BankConnection[];
+  currentUserId: string;
+}
+
+export function FerramentasTabs({ bankConnections, currentUserId }: Props) {
   return (
     <Tabs defaultValue="pdf-csv">
       <TabsList>
@@ -16,7 +30,7 @@ export function FerramentasTabs() {
       </TabsList>
 
       <TabsContent value="pdf-csv" className="mt-4">
-        <PdfToCsvTool />
+        <PdfToCsvTool bankConnections={bankConnections} currentUserId={currentUserId} />
       </TabsContent>
     </Tabs>
   );
