@@ -71,6 +71,7 @@ model BankConnection {
   bankName     String
   nickname     String?              // user-defined display name (overrides bankName in UI)
   bankLogo     String?
+  color        String?              // pastel hex color chosen by user
   accountType  AccountType          @default(PERSONAL)
   isCreditCard Boolean              @default(false)
   isManual     Boolean              @default(false)

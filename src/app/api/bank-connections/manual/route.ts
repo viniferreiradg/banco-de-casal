@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { bankName, nickname, accountType, isCreditCard } = await request.json();
+  const { bankName, nickname, accountType, isCreditCard, color } = await request.json();
   if (!bankName) return NextResponse.json({ error: "Nome obrigatório" }, { status: 400 });
 
   const connection = await prisma.bankConnection.create({
@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
       pluggyItemId: `manual_${user.id}_${Date.now()}`,
       bankName,
       nickname: nickname?.trim() || null,
+      color: color ?? null,
       accountType: accountType ?? "PERSONAL",
       isCreditCard: isCreditCard ?? false,
       isManual: true,

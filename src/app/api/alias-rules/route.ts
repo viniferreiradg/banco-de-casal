@@ -10,16 +10,12 @@ export async function GET() {
   const dbUser = await prisma.user.findUnique({ where: { id: user.id }, select: { coupleId: true } });
   const coupleId = dbUser?.coupleId ?? null;
 
-  try {
-    const rules = await prisma.aliasRule.findMany({
-      where: coupleId ? { coupleId } : { userId: user.id },
-      orderBy: { createdAt: "asc" },
-    });
-    return NextResponse.json({ rules });
-  } catch (err) {
-    console.error("[alias-rules GET]", err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
-  }
+  const rules = await prisma.aliasRule.findMany({
+    where: coupleId ? { coupleId } : { userId: user.id },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return NextResponse.json({ rules });
 }
 
 export async function POST(request: NextRequest) {
@@ -35,19 +31,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "name, matchValue e customName são obrigatórios" }, { status: 400 });
   }
 
-  try {
-    const rule = await prisma.aliasRule.create({
-      data: {
-        ...(coupleId ? { coupleId } : {}),
-        userId: user.id,
-        name,
-        matchValue: (Array.isArray(matchValue) ? matchValue.join(",") : matchValue).trim(),
-        customName: customName.trim(),
-      },
-    });
-    return NextResponse.json({ rule }, { status: 201 });
-  } catch (err) {
-    console.error("[alias-rules POST]", err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
-  }
+  const rule = await prisma.aliasRule.create({
+    data: {
+      ...(coupleId ? { coupleId } : {}),
+      userId: user.id,
+      name,
+      matchValue: (Array.isArray(matchValue) ? matchValue.join(",") : matchValue).trim(),
+      customName: customName.trim(),
+    },
+  });
+
+  return NextResponse.json({ rule }, { status: 201 });
 }

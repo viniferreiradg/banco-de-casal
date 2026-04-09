@@ -110,6 +110,15 @@ function parseDate(raw: string): Date | null {
 
 // POST /api/transactions/import — import CSV from bank statement
 export async function POST(request: NextRequest) {
+  try {
+    return await importHandler(request);
+  } catch (err) {
+    console.error("[import POST]", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
+}
+
+async function importHandler(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       },
       include: {
         split: { include: { appliedRule: { select: { name: true } } } },
-        bankConnection: { select: { id: true, bankName: true, accountType: true, isCreditCard: true } },
+        bankConnection: { select: { id: true, bankName: true, nickname: true, color: true, accountType: true, isCreditCard: true } },
         owner: { select: { id: true, name: true } },
       },
       orderBy: { date: "desc" },

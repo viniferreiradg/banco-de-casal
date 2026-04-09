@@ -12,17 +12,24 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Plus, RefreshCw, Trash2, CreditCard, Landmark, Wifi, FileText, ArrowRightLeft } from "lucide-react";
+import { Plus, RefreshCw, Trash2, CreditCard, Landmark, Wifi, FileText, ArrowRightLeft, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
+
+const PASTEL_COLORS = [
+  "#FFF5A0", "#FFE4C0", "#FFCCAA", "#FFB5B5",
+  "#E8F5A8", "#C8EFA8", "#A8F0D8", "#B8E8FF",
+  "#A8CCEF", "#C8B8F0", "#DDB8F0", "#FFB8D8",
+];
 
 interface BankConnection {
   id: string;
   bankName: string;
   nickname: string | null;
   bankLogo: string | null;
+  color: string | null;
   accountType: string;
   isCreditCard: boolean;
   isManual: boolean;
@@ -43,9 +50,17 @@ export default function ContasPage() {
   const [manualBankName, setManualBankName] = useState("");
   const [nickname, setNickname] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{ id: string; count: number } | null>(null);
   const [widgetError, setWidgetError] = useState<string | null>(null);
+
+  // Edit dialog state
+  const [editConn, setEditConn] = useState<BankConnection | null>(null);
+  const [editNickname, setEditNickname] = useState("");
+  const [editColor, setEditColor] = useState<string | null>(null);
+  const [editIsCreditCard, setEditIsCreditCard] = useState(false);
+  const [editAccountType, setEditAccountType] = useState<"PERSONAL" | "SHARED">("PERSONAL");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,12 +145,32 @@ export default function ContasPage() {
     await fetch("/api/bank-connections/manual", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bankName: manualBankName.trim(), nickname: nickname.trim() || null, accountType, isCreditCard }),
+      body: JSON.stringify({ bankName: manualBankName.trim(), nickname: nickname.trim() || null, accountType, isCreditCard, color: selectedColor }),
     });
     setConnectOpen(false);
     setConnecting(false);
     setManualBankName("");
     setNickname("");
+    setSelectedColor(null);
+    load();
+  }
+
+  function openEdit(conn: BankConnection) {
+    setEditConn(conn);
+    setEditNickname(conn.nickname ?? "");
+    setEditColor(conn.color);
+    setEditIsCreditCard(conn.isCreditCard);
+    setEditAccountType(conn.accountType as "PERSONAL" | "SHARED");
+  }
+
+  async function saveEdit() {
+    if (!editConn) return;
+    await fetch(`/api/bank-connections/${editConn.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nickname: editNickname || null, color: editColor, isCreditCard: editIsCreditCard, accountType: editAccountType }),
+    });
+    setEditConn(null);
     load();
   }
 
@@ -242,7 +277,10 @@ export default function ContasPage() {
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={conn.bankLogo} alt={conn.bankName} className="size-8 rounded" />
                     ) : (
-                      <div className="size-8 rounded bg-muted flex items-center justify-center">
+                      <div
+                        className="size-8 rounded-full flex items-center justify-center"
+                        style={conn.color ? { backgroundColor: conn.color } : { backgroundColor: "var(--muted)" }}
+                      >
                         {conn.isCreditCard
                           ? <CreditCard className="size-4 text-muted-foreground" />
                           : <Landmark className="size-4 text-muted-foreground" />
@@ -313,6 +351,15 @@ export default function ContasPage() {
                           <RefreshCw className={cn("size-3", syncingId === conn.id && "animate-spin")} />
                         </Button>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        title="Editar conta"
+                        onClick={() => openEdit(conn)}
+                      >
+                        <Pencil className="size-3" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -466,6 +513,31 @@ export default function ContasPage() {
               />
             </div>
 
+            {/* Color picker */}
+            <div className="space-y-2">
+              <Label>Cor <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+              <div className="flex flex-wrap gap-2">
+                {PASTEL_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setSelectedColor(selectedColor === c ? null : c)}
+                    className="size-7 rounded-full border-2 transition-transform hover:scale-110"
+                    style={{
+                      backgroundColor: c,
+                      borderColor: selectedColor === c ? "#555" : "transparent",
+                    }}
+                  />
+                ))}
+              </div>
+              {selectedColor && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <span className="inline-block size-3 rounded-full" style={{ backgroundColor: selectedColor }} />
+                  Cor selecionada · <button type="button" className="underline" onClick={() => setSelectedColor(null)}>remover</button>
+                </p>
+              )}
+            </div>
+
             <Button
               className="w-full"
               onClick={connectionMode === "AUTOMATIC" ? openPluggyWidget : saveManualConnection}
@@ -473,6 +545,110 @@ export default function ContasPage() {
             >
               {connecting ? "Aguarde..." : connectionMode === "AUTOMATIC" ? "Conectar via Open Finance" : "Adicionar conta"}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit dialog */}
+      <Dialog open={!!editConn} onOpenChange={(open) => { if (!open) setEditConn(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar conta</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+
+            {/* Account type */}
+            <div className="space-y-2">
+              <Label>Esta conta é</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {(["PERSONAL", "SHARED"] as const).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setEditAccountType(type)}
+                    className={cn(
+                      "flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-left transition-colors",
+                      editAccountType === type ? "border-primary bg-accent" : "border-border hover:border-muted-foreground"
+                    )}
+                  >
+                    <span className="text-sm font-medium">{type === "PERSONAL" ? "Pessoal" : "Compartilhada"}</span>
+                    <span className="text-xs text-muted-foreground">{type === "PERSONAL" ? "100% minha" : "Dividida com parceiro(a)"}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Card type */}
+            <div className="space-y-2">
+              <Label>Tipo</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setEditIsCreditCard(false)}
+                  className={cn(
+                    "flex items-center gap-2 p-3 rounded-lg border-2 text-left transition-colors",
+                    !editIsCreditCard ? "border-primary bg-accent" : "border-border hover:border-muted-foreground"
+                  )}
+                >
+                  <Landmark className="size-4 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">Débito / PIX</p>
+                    <p className="text-xs text-muted-foreground">Conta corrente</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setEditIsCreditCard(true)}
+                  className={cn(
+                    "flex items-center gap-2 p-3 rounded-lg border-2 text-left transition-colors",
+                    editIsCreditCard ? "border-primary bg-accent" : "border-border hover:border-muted-foreground"
+                  )}
+                >
+                  <CreditCard className="size-4 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">Crédito</p>
+                    <p className="text-xs text-muted-foreground">Fatura mensal</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Nickname */}
+            <div className="space-y-2">
+              <Label>Apelido <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+              <Input
+                placeholder="ex: Nubank Débito, Inter CC..."
+                value={editNickname}
+                onChange={(e) => setEditNickname(e.target.value)}
+              />
+            </div>
+
+            {/* Color picker */}
+            <div className="space-y-2">
+              <Label>Cor <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+              <div className="flex flex-wrap gap-2">
+                {PASTEL_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setEditColor(editColor === c ? null : c)}
+                    className="size-7 rounded-full border-2 transition-transform hover:scale-110"
+                    style={{
+                      backgroundColor: c,
+                      borderColor: editColor === c ? "#555" : "transparent",
+                    }}
+                  />
+                ))}
+              </div>
+              {editColor && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <span className="inline-block size-3 rounded-full" style={{ backgroundColor: editColor }} />
+                  Cor selecionada · <button type="button" className="underline" onClick={() => setEditColor(null)}>remover</button>
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button variant="outline" className="flex-1" onClick={() => setEditConn(null)}>Cancelar</Button>
+              <Button className="flex-1" onClick={saveEdit}>Salvar</Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

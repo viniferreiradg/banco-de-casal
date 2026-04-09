@@ -100,7 +100,7 @@ interface Transaction {
   pendingReview: boolean;
   split: Split | null;
   bankConnectionId: string;
-  bankConnection: { id: string; bankName: string; accountType: string; isCreditCard: boolean };
+  bankConnection: { id: string; bankName: string; nickname: string | null; color: string | null; accountType: string; isCreditCard: boolean };
   owner: { id: string; name: string };
 }
 
@@ -1477,18 +1477,16 @@ export default function TransacoesPage() {
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                      <div className="flex items-center gap-1">
-                        {tx.bankConnection.isCreditCard
-                          ? tx.bankConnection.accountType === "SHARED"
-                            ? <Users className="size-3 shrink-0" />
-                            : <CreditCard className="size-3 shrink-0" />
-                          : tx.bankConnection.accountType === "SHARED"
-                            ? <Users className="size-3 shrink-0" />
-                            : <Landmark className="size-3 shrink-0" />
+                    <TableCell className="whitespace-nowrap">
+                      <span
+                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium truncate max-w-[110px]"
+                        style={tx.bankConnection.color
+                          ? { backgroundColor: tx.bankConnection.color, color: "#444" }
+                          : { backgroundColor: "#e5e7eb", color: "#6b7280" }
                         }
-                        <span className="truncate max-w-[100px]">{tx.bankConnection.bankName}</span>
-                      </div>
+                      >
+                        {tx.bankConnection.nickname ?? tx.bankConnection.bankName}
+                      </span>
                     </TableCell>
                     <TableCell className="text-right font-medium text-sm">
                       {formatBRL(Number(tx.amount))}
@@ -1800,9 +1798,9 @@ export default function TransacoesPage() {
                 onChange={(e) => setImportBankId(e.target.value)}
               >
                 <option value="">Selecionar conta...</option>
-                {bankConnections.filter((b) => b.user.id === currentUserId || b.accountType === "SHARED").map((b) => (
+                {bankConnections.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {(b.nickname ?? b.bankName)} ({b.accountType === "SHARED" ? "Compartilhada" : "Pessoal"})
+                    {(b.nickname ?? b.bankName)}{b.accountType === "SHARED" ? " (Compartilhada)" : ""}{b.user.id !== currentUserId ? ` — ${b.user.name}` : ""}
                   </option>
                 ))}
               </select>
