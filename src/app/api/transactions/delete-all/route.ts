@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma/client";
 
 export async function DELETE(req: Request) {
   const supabase = await createClient();
@@ -8,10 +9,10 @@ export async function DELETE(req: Request) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
-  const month = searchParams.get("month"); // formato YYYY-MM
+  const month = searchParams.get("month");
   const accountIds = searchParams.getAll("accountId");
 
-  let where: Parameters<typeof prisma.transaction.deleteMany>[0]["where"] = { ownerUserId: user.id };
+  let where: Prisma.TransactionWhereInput = { ownerUserId: user.id };
 
   if (month) {
     const [y, m] = month.split("-").map(Number);
