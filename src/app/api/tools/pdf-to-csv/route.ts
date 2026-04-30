@@ -44,11 +44,10 @@ Formato obrigatório — sem cabeçalho, sem bloco de código markdown, sem text
 data,descricao,valor
 
 Regras:
-- data: DD/MM/YYYY
-- descricao: nome do estabelecimento limpo (sem códigos, sem abreviações desnecessárias, capitalize corretamente)
+- data: DD/MM/YYYY. Primeiro identifique o mês dominante da fatura (o mês que aparece na maioria das transações). Qualquer transação cuja data pertença a um mês diferente do mês dominante deve ter sua data substituída por 01/MM/YYYY do mês dominante (mantendo o mesmo ano). Isso cobre parcelamentos de meses anteriores que aparecem na fatura atual.
+- descricao: nome do estabelecimento limpo (sem códigos, capitalize corretamente). Se a transação for parcelada (ex: "CASSIA MODA 04/04", "Panificadora 2/5", "LOJA XYZ 01/12"), formate como "Nome - Parcela X/Y" (ex: "Cassia Moda - Parcela 4/4", "Panificadora - Parcela 2/5", "Loja Xyz - Parcela 1/12")
 - valor: número positivo com PONTO decimal, sem símbolo de moeda (ex: 45.90) — NUNCA use vírgula no valor pois o CSV usa vírgula como separador
 - Ignore: pagamentos recebidos, saldo anterior, totais, subtotais, linhas de cabeçalho, tarifas bancárias
-- Inclua parcelamentos (ex: "Panificadora 2/5" deve virar descricao "Panificadora")
 
 Retorne APENAS as linhas CSV, uma por linha, nada mais.`,
     ]);

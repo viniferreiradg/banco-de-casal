@@ -204,6 +204,8 @@ export default function TransacoesPage() {
   const [myNickname, setMyNickname] = useState<string | null>(null);
   const [partnerNickname, setPartnerNickname] = useState<string | null>(null);
   const [hidePartnerPersonal, setHidePartnerPersonal] = useState(true);
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [accountFilterOpen, setAccountFilterOpen] = useState(false);
   const [sortCol, setSortCol] = useState<"date" | "name" | "category" | "account" | "total" | "my" | "partner" | "pct">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -708,10 +710,22 @@ export default function TransacoesPage() {
   // ── Delete all (test only) ───────────────────────────────────
 
   async function deleteAll() {
-    if (!confirm("Apagar TODAS as transações? Essa ação não pode ser desfeita.")) return;
+    const hasAccountFilter = selectedAccounts.length > 0;
+    const accountNames = hasAccountFilter
+      ? selectedAccounts.map((id) => {
+          const b = bankConnections.find((b) => b.id === id);
+          return b?.nickname ?? b?.bankName ?? id;
+        }).join(", ")
+      : null;
+    const msg = hasAccountFilter
+      ? `Apagar todas as transações de ${monthLabel(month)} das contas: ${accountNames}? Essa ação não pode ser desfeita.`
+      : `Apagar todas as transações de ${monthLabel(month)}? Essa ação não pode ser desfeita.`;
+    if (!confirm(msg)) return;
     setDeletingAll(true);
     try {
-      await fetch("/api/transactions/delete-all", { method: "DELETE" });
+      const params = new URLSearchParams({ month });
+      if (hasAccountFilter) selectedAccounts.forEach((id) => params.append("accountId", id));
+      await fetch(`/api/transactions/delete-all?${params}`, { method: "DELETE" });
       load(true);
     } finally {
       setDeletingAll(false);
@@ -853,6 +867,7 @@ export default function TransacoesPage() {
       const myAmount = isCurrentUserUser1 ? Number(tx.split?.amountUser1 ?? 0) : Number(tx.split?.amountUser2 ?? 0);
       if (myAmount === 0) return false;
     }
+    if (selectedAccounts.length > 0 && !selectedAccounts.includes(tx.bankConnectionId)) return false;
     const search = filter.toLowerCase();
     return (
       tx.description.toLowerCase().includes(search) ||
@@ -980,12 +995,61 @@ export default function TransacoesPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <Input
           placeholder="Filtrar por nome, apelido ou categoria..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
+          className="min-w-0 flex-1"
         />
+        <Popover open={accountFilterOpen} onOpenChange={setAccountFilterOpen}>
+          <PopoverTrigger className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-input bg-background text-sm font-medium hover:bg-accent transition-colors">
+            <Landmark className="size-4" />
+            {selectedAccounts.length === 0
+              ? "Todas as contas"
+              : selectedAccounts.length === 1
+                ? (bankConnections.find((b) => b.id === selectedAccounts[0])?.nickname ?? bankConnections.find((b) => b.id === selectedAccounts[0])?.bankName ?? "1 conta")
+                : `${selectedAccounts.length} contas`}
+          </PopoverTrigger>
+          <PopoverContent className="w-64 p-2" align="end">
+            <div className="space-y-1">
+              <button
+                className={`w-full text-left px-2 py-1.5 rounded text-sm flex items-center gap-2 hover:bg-accent transition-colors ${selectedAccounts.length === 0 ? "font-medium" : ""}`}
+                onClick={() => setSelectedAccounts([])}
+              >
+                <span className={`size-4 rounded border flex items-center justify-center shrink-0 ${selectedAccounts.length === 0 ? "bg-primary border-primary text-primary-foreground" : "border-input"}`}>
+                  {selectedAccounts.length === 0 && <Check className="size-3" />}
+                </span>
+                Todas as contas
+              </button>
+              <div className="my-1 border-t" />
+              {bankConnections.map((b) => {
+                const checked = selectedAccounts.includes(b.id);
+                return (
+                  <button
+                    key={b.id}
+                    className="w-full text-left px-2 py-1.5 rounded text-sm flex items-center gap-2 hover:bg-accent transition-colors"
+                    onClick={() => {
+                      setSelectedAccounts((prev) =>
+                        prev.includes(b.id) ? prev.filter((id) => id !== b.id) : [...prev, b.id]
+                      );
+                    }}
+                  >
+                    <span className={`size-4 rounded border flex items-center justify-center shrink-0 ${checked ? "bg-primary border-primary text-primary-foreground" : "border-input"}`}>
+                      {checked && <Check className="size-3" />}
+                    </span>
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      {b.color && <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: b.color }} />}
+                      <span className="truncate">{b.nickname ?? b.bankName}</span>
+                      {b.isCreditCard && <CreditCard className="size-3 shrink-0 text-muted-foreground" />}
+                    </span>
+                    <span className="ml-auto text-xs text-muted-foreground shrink-0">{b.user.name.split(" ")[0]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </PopoverContent>
+        </Popover>
         <Button
           variant={hidePartnerPersonal ? "outline" : "secondary"}
           size="sm"
