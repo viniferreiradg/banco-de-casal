@@ -108,6 +108,7 @@ interface BankConnection {
   id: string;
   bankName: string;
   nickname: string | null;
+  color: string | null;
   accountType: string;
   isCreditCard: boolean;
   user: { id: string; name: string };
