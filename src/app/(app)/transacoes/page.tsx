@@ -205,6 +205,7 @@ export default function TransacoesPage() {
   const [myNickname, setMyNickname] = useState<string | null>(null);
   const [partnerNickname, setPartnerNickname] = useState<string | null>(null);
   const [hidePartnerPersonal, setHidePartnerPersonal] = useState(true);
+  const [showOnlyMine, setShowOnlyMine] = useState(false);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [accountFilterOpen, setAccountFilterOpen] = useState(false);
   const [sortCol, setSortCol] = useState<"date" | "name" | "category" | "account" | "total" | "my" | "partner" | "pct">("date");
@@ -260,6 +261,7 @@ export default function TransacoesPage() {
   // Split rule prompt (after changing percentage)
   const [splitRulePrompt, setSplitRulePrompt] = useState<{ description: string; myPct: number } | null>(null);
   const [savingSplitRule, setSavingSplitRule] = useState(false);
+  const [pendingSplitAfterCat, setPendingSplitAfterCat] = useState<{ description: string; myPct: number } | null>(null);
 
   // Split popover (inline quick-edit)
   const [splitPopover, setSplitPopover] = useState<{ txId: string; pct: number; originalPct: number } | null>(null);
@@ -638,16 +640,20 @@ export default function TransacoesPage() {
     if (pending) openQuickEdit(pending);
     const newCategory = quickEditForm.category.trim();
     const newMyPct = quickEditForm.pct ?? previousMyPct;
-    if (newCategory && newCategory !== previousCategory) {
+    const categoryChanged = !!(newCategory && newCategory !== previousCategory);
+    const pctChanged = quickEditForm.pct !== null && newMyPct !== previousMyPct;
+    if (categoryChanged) {
       setCatRulePrompt({ description: tx.description, category: newCategory });
-    } else if (quickEditForm.pct !== null && newMyPct !== previousMyPct) {
+      if (pctChanged) setPendingSplitAfterCat({ description: tx.description, myPct: newMyPct });
+    } else if (pctChanged) {
       setSplitRulePrompt({ description: tx.description, myPct: newMyPct });
     }
   }
 
-  async function createSplitRuleFromPrompt() {
+  async function createSplitRuleFromPrompt(applyToExisting = false) {
     if (!splitRulePrompt) return;
     setSavingSplitRule(true);
+    const pctUser1 = isCurrentUserUser1 ? splitRulePrompt.myPct : 100 - splitRulePrompt.myPct;
     await fetch("/api/rules", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -655,10 +661,18 @@ export default function TransacoesPage() {
         name: splitRulePrompt.description,
         matchField: "DESCRIPTION",
         matchValue: splitRulePrompt.description,
-        pctUser1: splitRulePrompt.myPct,
+        pctUser1,
         priority: 0,
       }),
     });
+    if (applyToExisting) {
+      await fetch("/api/transactions/bulk-split", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchValue: splitRulePrompt.description, pctUser1 }),
+      });
+      load(true);
+    }
     setSavingSplitRule(false);
     setSplitRulePrompt(null);
   }
@@ -687,7 +701,15 @@ export default function TransacoesPage() {
       load(true);
     }
     setSavingCatRule(false);
+    closeCatRulePrompt();
+  }
+
+  function closeCatRulePrompt() {
     setCatRulePrompt(null);
+    if (pendingSplitAfterCat) {
+      setSplitRulePrompt(pendingSplitAfterCat);
+      setPendingSplitAfterCat(null);
+    }
   }
 
   // ── Pending review ───────────────────────────────────────────
@@ -863,6 +885,7 @@ export default function TransacoesPage() {
   const getCategoryIcon = (name: string) => categoryIconMap[name.toLowerCase()] ?? null;
 
   const filtered = transactions.filter((tx) => {
+    if (showOnlyMine && currentUserId && tx.owner.id !== currentUserId) return false;
     if (hidePartnerPersonal && currentUserId && tx.owner.id !== currentUserId) {
       // Só oculta se o usuário logado tem 0% de participação
       const myAmount = isCurrentUserUser1 ? Number(tx.split?.amountUser1 ?? 0) : Number(tx.split?.amountUser2 ?? 0);
@@ -1051,6 +1074,15 @@ export default function TransacoesPage() {
             </div>
           </PopoverContent>
         </Popover>
+        <Button
+          variant={showOnlyMine ? "default" : "secondary"}
+          size="sm"
+          onClick={() => setShowOnlyMine((v) => !v)}
+          className="shrink-0 gap-1.5"
+        >
+          <Users className="size-4" />
+          Modo eu
+        </Button>
         <Button
           variant={hidePartnerPersonal ? "outline" : "secondary"}
           size="sm"
@@ -1812,17 +1844,22 @@ export default function TransacoesPage() {
                 : `parceiro(a): ${100 - (splitRulePrompt?.myPct ?? 0)}% / você: ${splitRulePrompt?.myPct}%`}
             </strong>?
           </p>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setSplitRulePrompt(null)}>Não</Button>
-            <Button onClick={createSplitRuleFromPrompt} disabled={savingSplitRule}>
-              {savingSplitRule ? "Criando..." : "Sim, criar regra"}
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <Button onClick={() => createSplitRuleFromPrompt(true)} disabled={savingSplitRule} className="w-full">
+              {savingSplitRule ? "Aplicando..." : "Sim, para todas as compras"}
+            </Button>
+            <Button variant="outline" onClick={() => createSplitRuleFromPrompt(false)} disabled={savingSplitRule} className="w-full">
+              Sim, só para as próximas
+            </Button>
+            <Button variant="ghost" onClick={() => setSplitRulePrompt(null)} disabled={savingSplitRule} className="w-full">
+              Não
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Category rule prompt */}
-      <Dialog open={!!catRulePrompt} onOpenChange={(open) => { if (!open) setCatRulePrompt(null); }}>
+      <Dialog open={!!catRulePrompt} onOpenChange={(open) => { if (!open) closeCatRulePrompt(); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Criar regra automática?</DialogTitle>
@@ -1840,7 +1877,7 @@ export default function TransacoesPage() {
             <Button variant="outline" onClick={() => createCatRuleFromPrompt(false)} disabled={savingCatRule} className="w-full">
               Sim, só para as próximas
             </Button>
-            <Button variant="ghost" onClick={() => setCatRulePrompt(null)} disabled={savingCatRule} className="w-full">
+            <Button variant="ghost" onClick={() => closeCatRulePrompt()} disabled={savingCatRule} className="w-full">
               Não
             </Button>
           </DialogFooter>

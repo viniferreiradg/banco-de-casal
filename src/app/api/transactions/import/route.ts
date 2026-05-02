@@ -169,7 +169,19 @@ async function importHandler(request: NextRequest) {
   }
 
   const sep = detectSeparator(rawLines[0]);
-  const normHeaders = parseCsvLine(rawLines[0], sep).map(normalizeHeader);
+
+  // Some banks (e.g. Bradesco) have metadata lines before the real header.
+  // Find the first line that contains a recognizable "data" column.
+  let headerLineIdx = 0;
+  for (let i = 0; i < Math.min(rawLines.length, 10); i++) {
+    const cols = parseCsvLine(rawLines[i], sep).map(normalizeHeader);
+    if (cols.some((h) => h === "data" || h === "date" || h.startsWith("data "))) {
+      headerLineIdx = i;
+      break;
+    }
+  }
+
+  const normHeaders = parseCsvLine(rawLines[headerLineIdx], sep).map(normalizeHeader);
 
   // Column detection
   const dateIdx = normHeaders.findIndex((h) => h === "data" || h === "date" || h.startsWith("data "));
@@ -182,11 +194,16 @@ async function importHandler(request: NextRequest) {
 
   const amtIdx = normHeaders.findIndex((h) => h.includes("valor") || h.includes("amount") || h === "value");
 
+  // Bradesco-style: separate credit and debit columns instead of a single amount column
+  const creditIdx = amtIdx === -1 ? normHeaders.findIndex((h) => h.includes("credito") || h.includes("crédito")) : -1;
+  const debitIdx = amtIdx === -1 ? normHeaders.findIndex((h) => h.includes("debito") || h.includes("débito")) : -1;
+  const hasSplitAmounts = amtIdx === -1 && (creditIdx !== -1 || debitIdx !== -1);
+
   // Category: "lancamento" type column (e.g. "Compra com Cartão") or explicit "categ"
   let catIdx = normHeaders.findIndex((h) => h.includes("categ"));
   if (catIdx === -1) catIdx = normHeaders.findIndex((h) => h.includes("lan") && !h.includes("tipo") && h !== normHeaders[descIdx]);
 
-  if (dateIdx === -1 || descIdx === -1 || amtIdx === -1) {
+  if (dateIdx === -1 || descIdx === -1 || (amtIdx === -1 && !hasSplitAmounts)) {
     return NextResponse.json({
       error: `CSV não reconhecido. Colunas encontradas: ${normHeaders.join(", ")}. O arquivo precisa ter colunas de data, descrição e valor.`,
     }, { status: 400 });
@@ -217,11 +234,22 @@ async function importHandler(request: NextRequest) {
     );
   };
 
+  // Helper: resolve signed amount from either a single amount column or split credit/debit columns.
+  // For split columns (Bradesco): debit → negative (expense), credit → positive (income, will be skipped).
+  function resolveRawAmount(cols: string[]): string {
+    if (!hasSplitAmounts) return cols[amtIdx] ?? "";
+    const debit = debitIdx >= 0 ? parseAmount(cols[debitIdx] ?? "") : null;
+    const credit = creditIdx >= 0 ? parseAmount(cols[creditIdx] ?? "") : null;
+    if (debit !== null && debit > 0) return String(-debit); // expense
+    if (credit !== null && credit > 0) return String(credit);  // income (positive → skipped later)
+    return "";
+  }
+
   // Early incompatibility check: scan ALL raw amounts (before sign filtering) to detect
   // if this is a credit card CSV uploaded to a debit account (or vice versa)
-  if (!isCreditCard && !isNubankStyle && tipoIdx === -1) {
+  if (!isCreditCard && !isNubankStyle && tipoIdx === -1 && !hasSplitAmounts) {
     const rawAmounts: number[] = [];
-    for (let i = 1; i < rawLines.length; i++) {
+    for (let i = headerLineIdx + 1; i < rawLines.length; i++) {
       const cols = parseCsvLine(rawLines[i], sep);
       if (cols.length <= amtIdx) continue;
       const amount = parseAmount(cols[amtIdx] ?? "");
@@ -238,11 +266,14 @@ async function importHandler(request: NextRequest) {
   // Pre-scan: collect valid rows to know total before streaming
   type ValidRow = { rawDate: string; rawDescription: string; rawAmount: string; rawCategory: string };
   const validRows: ValidRow[] = [];
-  for (let i = 1; i < rawLines.length; i++) {
+  for (let i = headerLineIdx + 1; i < rawLines.length; i++) {
     const cols = parseCsvLine(rawLines[i], sep);
-    if (cols.length <= Math.max(dateIdx, descIdx, amtIdx)) continue;
+    const minIdx = hasSplitAmounts
+      ? Math.max(dateIdx, descIdx, Math.max(creditIdx, debitIdx))
+      : Math.max(dateIdx, descIdx, amtIdx);
+    if (cols.length <= minIdx) continue;
     const rawDescription = cols[descIdx] ?? "";
-    const rawAmount = cols[amtIdx] ?? "";
+    const rawAmount = resolveRawAmount(cols);
     const rawTipo = tipoIdx >= 0 ? normalizeHeader(cols[tipoIdx] ?? "") : "";
     // Check saldo in description AND in category/type column (e.g. BB's "S A L D O" is in lançamento col)
     const isSaldo = (txt: string) => { const n = normalizeHeader(txt); return n.includes("saldo") || n.replace(/\s/g, "") === "saldo"; };

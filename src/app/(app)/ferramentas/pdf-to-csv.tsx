@@ -67,6 +67,7 @@ export function PdfToCsvTool({ bankConnections, currentUserId }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [bankId, setBankId] = useState("");
+  const [bankType, setBankType] = useState("itau");
   const [converting, setConverting] = useState(false);
   const [csvContent, setCsvContent] = useState<string | null>(null);
   const [csvFilename, setCsvFilename] = useState("");
@@ -119,6 +120,7 @@ export function PdfToCsvTool({ bankConnections, currentUserId }: Props) {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("bank", bankType);
       const res = await fetch("/api/tools/pdf-to-csv", { method: "POST", body: fd });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -243,6 +245,19 @@ export function PdfToCsvTool({ bankConnections, currentUserId }: Props) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+
+          {/* Bank selector */}
+          <div className="space-y-2">
+            <Label>Banco do extrato</Label>
+            <select
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              value={bankType}
+              onChange={(e) => setBankType(e.target.value)}
+            >
+              <option value="itau">Itaú</option>
+              <option value="bradesco">Bradesco</option>
+            </select>
+          </div>
 
           {/* Account selector */}
           <div className="space-y-2">

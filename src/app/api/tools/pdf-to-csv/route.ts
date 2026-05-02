@@ -11,6 +11,7 @@ export async function POST(request: NextRequest) {
 
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
+  const bank = (formData.get("bank") as string | null) ?? "itau";
 
   if (!file) {
     return NextResponse.json({ error: "Nenhum arquivo enviado." }, { status: 400 });
@@ -29,16 +30,8 @@ export async function POST(request: NextRequest) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-  let result;
-  try {
-    result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType: "application/pdf",
-          data: pdfBase64,
-        },
-      },
-      `Extraia todas as transações de compra desta fatura bancária em CSV.
+  const prompts: Record<string, string> = {
+    itau: `Extraia todas as transações de compra desta fatura bancária em CSV.
 
 Formato obrigatório — sem cabeçalho, sem bloco de código markdown, sem texto extra:
 data,descricao,valor
@@ -50,6 +43,34 @@ Regras:
 - Ignore: pagamentos recebidos, saldo anterior, totais, subtotais, linhas de cabeçalho, tarifas bancárias
 
 Retorne APENAS as linhas CSV, uma por linha, nada mais.`,
+
+    bradesco: `Extraia as transações de débito deste extrato bancário Bradesco em CSV.
+
+Formato obrigatório — sem cabeçalho, sem bloco de código markdown, sem texto extra:
+data,descricao,valor
+
+Regras:
+- Inclua APENAS linhas que possuem valor na coluna "Débito (R$)" (valores em vermelho). Ignore completamente linhas que só têm valor em "Crédito (R$)".
+- data: DD/MM/YYYY. A data aparece somente na primeira transação de cada dia — propague essa data para todas as transações seguintes sem data, até aparecer uma nova data.
+- descricao: cada transação pode ter duas linhas de texto — a principal (ex: "CARTAO VISA ELECTRON", "PIX QR CODE DINAMICO") e uma secundária menor logo abaixo (ex: "PostoMeurer", "NT JEANS", "DES: MODA MUNDIAL BRASIL P 02/04"). Use a linha secundária quando existir, pois é o nome real do estabelecimento. Se não houver linha secundária, use a linha principal. Capitalize corretamente, sem códigos.
+- valor: número NEGATIVO com PONTO decimal, sem símbolo de moeda (ex: -45.90) — débitos são saídas de dinheiro, portanto sempre negativos. NUNCA use vírgula no valor pois o CSV usa vírgula como separador.
+- Ignore: rentabilidade de investimento (RENTAB.INVEST), saldo, cabeçalhos, totais, rodapé.
+
+Retorne APENAS as linhas CSV, uma por linha, nada mais.`,
+  };
+
+  const prompt = prompts[bank] ?? prompts.itau;
+
+  let result;
+  try {
+    result = await model.generateContent([
+      {
+        inlineData: {
+          mimeType: "application/pdf",
+          data: pdfBase64,
+        },
+      },
+      prompt,
     ]);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro desconhecido.";
