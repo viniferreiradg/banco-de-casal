@@ -150,8 +150,13 @@ async function importHandler(request: NextRequest) {
     },
   });
 
-  if (!bankConnection || bankConnection.userId !== user.id) {
+  if (!bankConnection) {
     return NextResponse.json({ error: "Conta não encontrada" }, { status: 404 });
+  }
+  const isOwner = bankConnection.userId === user.id;
+  const isSharedAccount = bankConnection.accountType === "SHARED";
+  if (!isOwner && !isSharedAccount) {
+    return NextResponse.json({ error: "Sem permissão para lançar nesta conta" }, { status: 403 });
   }
 
   // Decode file — try UTF-8, fall back to windows-1252 (common in Brazilian bank exports)
